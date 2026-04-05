@@ -1,0 +1,36 @@
+{
+  "$schema": "https://deno.land/x/deno/cli/schemas/config-file.v1.json",
+  "compilerOptions": {
+    "strict": true,
+    "lib": [
+      "deno.window"
+    ]
+  },
+  "fmt": {
+    "useTabs": false,
+    "lineWidth": 100,
+    "indentWidth": 2,
+    "singleQuote": true
+  },
+  "lint": {
+    "rules": {
+      "tags": [
+        "recommended"
+      ]
+    }
+  },
+  "imports": {
+    "@std/cli": "jsr:@std/cli@^1.0.27",
+    "@std/fs": "jsr:@std/fs@^1.0.22",
+    "@std/path": "jsr:@std/path@^1.1.4",
+    "@std/fmt/colors": "jsr:@std/fmt@^1.0.9/colors",
+    "@std/yaml": "jsr:@std/yaml@^1.0.11",
+    "@cliffy/command": "jsr:@cliffy/command@^1.0.0-rc.8"
+  },
+  "tasks": {
+    "cli": "deno run --allow-read --allow-write --allow-env=HOME --allow-net=platform.claude.com,code.claude.com,github.com,codeload.github.com --allow-run=tar skillutil.ts",
+    "check": "deno check skillutil.ts",
+    "test": "deno run --allow-read --allow-write --allow-run=deno,tar --allow-env=HOME,TMPDIR --allow-net=platform.claude.com,code.claude.com,github.com,codeload.github.com test-skillutil.ts",
+    "install": "deno install --global --config=./deno.json --allow-read --allow-write --allow-env=HOME --allow-net=platform.claude.com,code.claude.com,github.com,codeload.github.com --allow-run=tar --name skillutil --force skillutil.ts"
+  }
+}
