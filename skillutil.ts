@@ -19,6 +19,7 @@ import { parse as parseYAML } from '@std/yaml';
 import { join, resolve } from '@std/path';
 import { exists, move } from '@std/fs';
 import { Command } from '@cliffy/command';
+import { CompletionsCommand } from '@cliffy/command/completions';
 import { dim, green, italic, magenta, red, yellow } from '@std/fmt/colors';
 
 // ============================================================================
@@ -29,7 +30,7 @@ const homeDir = Deno.env.get('HOME');
 if (!homeDir) throw new Error('HOME not set');
 
 // TODO: build `update` command with simple lock file for tracking like npx skills
-const SKILLS_DIR = join(homeDir, '.agents/skills');
+const SKILLS_DIR = join(homeDir, '.local/share/chezmoi/dot_agents/skills');
 const TEMPLATE_DIR = resolve('./assets/');
 const SKILL_DEV_DIR = join(SKILLS_DIR, 'develop-agent-skills');
 const DEACTIVATED_SKILLS = join(SKILLS_DIR, '_deactivated');
@@ -64,6 +65,36 @@ interface SkillFrontmatter {
 interface ValidationResult {
   valid: boolean;
   message: string;
+}
+
+// ============================================================================
+// Skill Name Helpers (used by completions and list command)
+// ============================================================================
+
+/** List active skill directory names, excluding internal dirs (prefixed with _). */
+async function getActiveSkillNames(): Promise<string[]> {
+  const names: string[] = [];
+  if (await exists(SKILLS_DIR)) {
+    for await (const entry of Deno.readDir(SKILLS_DIR)) {
+      if (entry.isDirectory && !entry.name.startsWith('_')) {
+        names.push(entry.name);
+      }
+    }
+  }
+  return names.sort();
+}
+
+/** List deactivated skill directory names. */
+async function getDeactivatedSkillNames(): Promise<string[]> {
+  const names: string[] = [];
+  if (await exists(DEACTIVATED_SKILLS)) {
+    for await (const entry of Deno.readDir(DEACTIVATED_SKILLS)) {
+      if (entry.isDirectory) {
+        names.push(entry.name);
+      }
+    }
+  }
+  return names.sort();
 }
 
 // ============================================================================
@@ -824,135 +855,7 @@ async function addSkill(githubUrl: string, destPath: string): Promise<boolean> {
 }
 
 // ============================================================================
-// Command: completion
-// ============================================================================
-
-// Embedded fish completion script — kept in sync with skillutil.fish
-const FISH_COMPLETION = `# Fish completions for skillutil - Cross-agent Skill management CLI
-
-# Skill directory locations
-set -l skills_dir "$HOME/.agents/skills"
-set -l deactivated_dir "$HOME/.agents/skills/_deactivated"
-
-# Helper: list active skill names (directories in skills_dir, excluding internals)
-function __skillutil_active_skills
-    set -l skills_dir "$HOME/.agents/skills"
-    if test -d "$skills_dir"
-        for entry in $skills_dir/*/
-            set -l name (string replace -r '.*/' '' -- (string trim -r -c / -- $entry))
-            # Skip internal dirs (prefixed with _)
-            if not string match -q '_*' -- $name
-                echo $name
-            end
-        end
-    end
-end
-
-# Helper: list deactivated skill names
-function __skillutil_deactivated_skills
-    set -l deactivated_dir "$HOME/.agents/skills/_deactivated"
-    if test -d "$deactivated_dir"
-        for entry in $deactivated_dir/*/
-            set -l name (string replace -r '.*/' '' -- (string trim -r -c / -- $entry))
-            echo $name
-        end
-    end
-end
-
-# Helper: list all skill names (active + deactivated)
-function __skillutil_all_skills
-    __skillutil_active_skills
-    __skillutil_deactivated_skills
-end
-
-# Condition: no subcommand yet
-function __skillutil_no_subcommand
-    set -l cmd (commandline -opc)
-    for subcmd in init validate refresh-docs activate deactivate list add completion
-        if contains -- $subcmd $cmd
-            return 1
-        end
-    end
-    return 0
-end
-
-# Condition helpers for specific subcommands
-function __skillutil_using_subcommand
-    set -l cmd (commandline -opc)
-    contains -- $argv[1] $cmd
-end
-
-# Disable file completions for skillutil by default
-complete -c skillutil -f
-
-# Global options
-complete -c skillutil -n __skillutil_no_subcommand -l help -s h -d "Show help"
-complete -c skillutil -n __skillutil_no_subcommand -l version -s V -d "Show version"
-
-# Subcommands
-complete -c skillutil -n __skillutil_no_subcommand -a init -d "Initialize a new skill from template"
-complete -c skillutil -n __skillutil_no_subcommand -a validate -d "Validate skill structure and frontmatter"
-complete -c skillutil -n __skillutil_no_subcommand -a refresh-docs -d "Fetch latest Anthropic skill documentation"
-complete -c skillutil -n __skillutil_no_subcommand -a activate -d "Move skill from deactivated to active"
-complete -c skillutil -n __skillutil_no_subcommand -a deactivate -d "Move skill from active to deactivated"
-complete -c skillutil -n __skillutil_no_subcommand -a list -d "List skills"
-complete -c skillutil -n __skillutil_no_subcommand -a add -d "Add skill(s) from a GitHub tree URL"
-complete -c skillutil -n __skillutil_no_subcommand -a completion -d "Output shell completion script"
-
-# init: skill name arg (suggest existing for reference, but free-form is fine)
-complete -c skillutil -n '__skillutil_using_subcommand init' -l path -s p -r -d "Base path for new skill" -F
-complete -c skillutil -n '__skillutil_using_subcommand init' -l fork -s f -r -d "GitHub repo URL to fork as skill basis"
-complete -c skillutil -n '__skillutil_using_subcommand init' -l help -s h -d "Show help"
-
-# validate: expects a directory path, enable file/dir completions
-complete -c skillutil -n '__skillutil_using_subcommand validate' -F
-complete -c skillutil -n '__skillutil_using_subcommand validate' -l help -s h -d "Show help"
-
-# refresh-docs: no arguments
-complete -c skillutil -n '__skillutil_using_subcommand refresh-docs' -l help -s h -d "Show help"
-
-# activate: complete with deactivated skill names
-complete -c skillutil -n '__skillutil_using_subcommand activate' -a '(__skillutil_deactivated_skills)' -d "Deactivated skill"
-complete -c skillutil -n '__skillutil_using_subcommand activate' -l help -s h -d "Show help"
-
-# deactivate: complete with active skill names
-complete -c skillutil -n '__skillutil_using_subcommand deactivate' -a '(__skillutil_active_skills)' -d "Active skill"
-complete -c skillutil -n '__skillutil_using_subcommand deactivate' -l help -s h -d "Show help"
-
-# list
-complete -c skillutil -n '__skillutil_using_subcommand list' -l all -s a -d "Include deactivated skills"
-complete -c skillutil -n '__skillutil_using_subcommand list' -l help -s h -d "Show help"
-
-# add: expects a GitHub URL (free-form), plus --path flag
-complete -c skillutil -n '__skillutil_using_subcommand add' -l path -s p -r -d "Destination directory for added skills" -F
-complete -c skillutil -n '__skillutil_using_subcommand add' -l help -s h -d "Show help"
-
-# completion: complete with shell names
-complete -c skillutil -n '__skillutil_using_subcommand completion' -a 'fish bash zsh' -d "Shell type"
-complete -c skillutil -n '__skillutil_using_subcommand completion' -l help -s h -d "Show help"
-`;
-
-const SUPPORTED_SHELLS = ['fish', 'bash', 'zsh'] as const;
-type Shell = typeof SUPPORTED_SHELLS[number];
-
-function printCompletion(shell: Shell): boolean {
-  switch (shell) {
-    case 'fish':
-      // Write directly to stdout — no logging, no color, pipe-safe
-      Deno.stdout.writeSync(new TextEncoder().encode(FISH_COMPLETION));
-      return true;
-    case 'bash':
-    case 'zsh':
-      console.log(
-        `${yellow('⚠')} ${shell} completion has not been generated yet.`,
-      );
-      console.log(
-        `  ${dim(italic('Only fish is available right now. We can add others down the road.'))}`,
-      );
-      return false;
-  }
-}
-
+// CLI Definition with Cliffy
 // ============================================================================
 // CLI Definition with Cliffy
 // ============================================================================
@@ -965,11 +868,14 @@ const cli = new Command()
   .meta('Docs', 'https://code.claude.com/docs/en/skills')
   .meta('Templates', TEMPLATE_DIR)
   .meta('Active User Skills', SKILLS_DIR)
-  .meta('Deactivated User Skills', DEACTIVATED_SKILLS);
+  .meta('Deactivated User Skills', DEACTIVATED_SKILLS)
+  .globalComplete('active-skill', () => getActiveSkillNames())
+  .globalComplete('deactivated-skill', () => getDeactivatedSkillNames());
 
 // Init command
 cli
   .command('init <skill-name:string>')
+  .alias('new')
   .description('Initialize a new skill from template')
   .option('-p, --path <path:string>', 'Base path for new skill', {
     default: SKILLS_DIR,
@@ -997,6 +903,7 @@ cli
 // Validate command
 cli
   .command('validate <skill-path:string>')
+  .alias('check')
   .description('Validate skill structure and frontmatter')
   .example('Validate a skill', 'skillutil validate agents/skills/my-skill')
   .action(async (_options, skillPath) => {
@@ -1017,7 +924,8 @@ cli
 
 // Activate command
 cli
-  .command('activate <skill-name:string>')
+  .command('activate <skill-name:string:deactivated-skill>')
+  .alias('on')
   .description('Move skill from deactivated to active')
   .example('Enable a skill', 'skillutil activate old-skill')
   .action(async (_options, skillName) => {
@@ -1027,7 +935,8 @@ cli
 
 // Deactivate command
 cli
-  .command('deactivate <skill-name:string>')
+  .command('deactivate <skill-name:string:active-skill>')
+  .alias('off')
   .description('Move skill from active to deactivated')
   .example('Disable a skill', 'skillutil deactivate old-skill')
   .action(async (_options, skillName) => {
@@ -1038,6 +947,7 @@ cli
 // List command
 cli
   .command('list')
+  .alias('ls')
   .description('List skills')
   .option('-a, --all', 'Include deactivated skills', { default: false })
   .example('List active skills', 'skillutil list')
@@ -1050,6 +960,7 @@ cli
 // Add command
 cli
   .command('add <github-url:string>')
+  .alias('a')
   .description(
     'Add skill(s) from a GitHub tree URL — single skill or a whole skills directory',
   )
@@ -1073,29 +984,8 @@ cli
     Deno.exit(success ? 0 : 1);
   });
 
-// Completion command
-cli
-  .command('completion <shell:string>')
-  .description('Output shell completion script')
-  .example(
-    'Fish (write to completions dir)',
-    'skillutil completion fish > ~/.config/fish/completions/skillutil.fish',
-  )
-  .example('Fish (preview)', 'skillutil completion fish')
-  .action((_options, shell) => {
-    const s = shell.toLowerCase();
-    if (!SUPPORTED_SHELLS.includes(s as Shell)) {
-      console.error(
-        `${red('❌ Error:')} Unknown shell ${magenta(shell)}`,
-      );
-      console.error(
-        `   ${dim(italic('Supported shells:'))} ${SUPPORTED_SHELLS.join(', ')}`,
-      );
-      Deno.exit(2);
-    }
-    const success = printCompletion(s as Shell);
-    Deno.exit(success ? 0 : 1);
-  });
+// Completions command (auto-generates shell completions for bash, fish, zsh)
+cli.command('completions', new CompletionsCommand());
 
 // ============================================================================
 // Entry Point
