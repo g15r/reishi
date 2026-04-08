@@ -20,12 +20,12 @@
     }
   },
   "imports": {
-    "@std/cli": "jsr:@std/cli@^1.0.27",
-    "@std/fs": "jsr:@std/fs@^1.0.22",
+    "@std/cli": "jsr:@std/cli@^1.0.28",
+    "@std/fs": "jsr:@std/fs@^1.0.23",
     "@std/path": "jsr:@std/path@^1.1.4",
     "@std/fmt/colors": "jsr:@std/fmt@^1.0.9/colors",
-    "@std/yaml": "jsr:@std/yaml@^1.0.11",
-    "@cliffy/command": "jsr:@cliffy/command@^1.0.0-rc.8"
+    "@std/yaml": "jsr:@std/yaml@^1.0.12",
+    "@cliffy/command": "jsr:@cliffy/command@^1.0.0"
   },
   "tasks": {
     "cli": "deno run --allow-read --allow-write --allow-env=HOME --allow-net=platform.claude.com,code.claude.com,github.com,codeload.github.com --allow-run=tar skillutil.ts",
