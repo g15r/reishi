@@ -28,9 +28,9 @@
     "@cliffy/command": "jsr:@cliffy/command@^1.0.0"
   },
   "tasks": {
-    "cli": "deno run --allow-read --allow-write --allow-env=HOME --allow-net=platform.claude.com,code.claude.com,github.com,codeload.github.com --allow-run=tar skillutil.ts",
-    "check": "deno check skillutil.ts",
-    "test": "deno run --allow-read --allow-write --allow-run=deno,tar --allow-env=HOME,TMPDIR --allow-net=platform.claude.com,code.claude.com,github.com,codeload.github.com test-skillutil.ts",
-    "install": "deno install --global --config=./deno.json --allow-read --allow-write --allow-env=HOME --allow-net=platform.claude.com,code.claude.com,github.com,codeload.github.com --allow-run=tar --name skillutil --force skillutil.ts"
+    "cli": "deno run --allow-read --allow-write --allow-env=HOME --allow-net=platform.claude.com,code.claude.com,github.com,codeload.github.com --allow-run=tar reishi.ts",
+    "check": "deno check reishi.ts",
+    "test": "deno run --allow-read --allow-write --allow-run=deno,tar --allow-env=HOME,TMPDIR --allow-net=platform.claude.com,code.claude.com,github.com,codeload.github.com test-reishi.ts",
+    "install": "deno install --global --config=./deno.json --allow-read --allow-write --allow-env=HOME --allow-net=platform.claude.com,code.claude.com,github.com,codeload.github.com --allow-run=tar --name rei --force reishi.ts"
   }
 }

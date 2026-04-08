@@ -1,18 +1,17 @@
 #!/usr/bin/env -S deno run --allow-read --allow-write --allow-env=HOME --allow-net=platform.claude.com,code.claude.com,github.com,codeload.github.com --allow-run=tar
 
 /**
- * skillutil - Unified CLI for Claude Agent Skill management
+ * reishi - Unified CLI for Claude Agent Skill management
  *
  * Run in dev mode:
- *   deno task skillutil <command> [options]
- *   deno task skillutil:check  (type check)
- *   deno task skillutil:test   (run tests)
+ *   deno task cli <command> [options]
+ *   deno task check  (type check)
+ *   deno task test   (run tests)
  *
  * Install as global binary:
- *   deno task skillutil:install
- *   skillutil <command> [options]
- *
- * Templates are read from: agents/skills/_skillutil/assets
+ *   deno task install
+ *   then...
+ *   rei <command> [options]
  */
 
 import { parse as parseYAML } from '@std/yaml';
@@ -234,7 +233,7 @@ async function initSkill(
       '2. Customize or delete the example reference file or the examples in scripts/, and assets/',
     );
     console.log('3. Run the validator when ready to check the skill structure');
-    console.log(`   ${dim(italic('skillutil validate'))} ${magenta(skillDir)}`);
+    console.log(`   ${dim(italic('rei validate'))} ${magenta(skillDir)}`);
 
     return true;
   } catch (error) {
@@ -343,7 +342,7 @@ async function forkSkill(
     }
     console.log('2. Customize the skill contents for your use case');
     console.log(
-      `3. Validate when ready: ${dim(italic('skillutil validate'))} ${magenta(skillDir)}`,
+      `3. Validate when ready: ${dim(italic('rei validate'))} ${magenta(skillDir)}`,
     );
 
     return true;
@@ -707,7 +706,7 @@ async function addSkill(githubUrl: string, destPath: string): Promise<boolean> {
       `   ${dim(italic('Expected:'))} https://github.com/user/repo/tree/branch[/path]`,
     );
     console.error(
-      `   ${dim(italic('For plain repo URLs, use:'))} skillutil init --fork <url>`,
+      `   ${dim(italic('For plain repo URLs, use:'))} rei init --fork <url>`,
     );
     return false;
   }
@@ -787,7 +786,7 @@ async function addSkill(githubUrl: string, destPath: string): Promise<boolean> {
         console.log(`\n${dim(italic('Next steps:'))}`);
         console.log('1. Review SKILL.md to ensure it fits your setup');
         console.log(
-          `2. Validate: ${dim(italic('skillutil validate'))} ${magenta(join(destPath, skillName))}`,
+          `2. Validate: ${dim(italic('rei validate'))} ${magenta(join(destPath, skillName))}`,
         );
       }
       return ok;
@@ -861,7 +860,7 @@ async function addSkill(githubUrl: string, destPath: string): Promise<boolean> {
 // ============================================================================
 
 const cli = new Command()
-  .name('skillutil')
+  .name('rei')
   .version('0.1.0')
   .description('Cross-agent Skill management CLI')
   .meta('Author', 'winnie [gwenwindflower@gh] + Claude Code')
@@ -884,14 +883,14 @@ cli
     '-f, --fork <url:string>',
     'Use a GitHub repo as the skill basis (main branch HEAD)',
   )
-  .example('Create in default location', 'skillutil init my-new-skill')
+  .example('Create in default location', 'rei init my-new-skill')
   .example(
     'Create in custom location',
-    'skillutil init my-new-skill --path skills/public',
+    'rei init my-new-skill --path skills/public',
   )
   .example(
     'Fork from GitHub',
-    'skillutil init my-skill --fork https://github.com/user/repo',
+    'rei init my-skill --fork https://github.com/user/repo',
   )
   .action(async (options, skillName) => {
     const success = options.fork
@@ -905,7 +904,7 @@ cli
   .command('validate <skill-path:string>')
   .alias('check')
   .description('Validate skill structure and frontmatter')
-  .example('Validate a skill', 'skillutil validate agents/skills/my-skill')
+  .example('Validate a skill', 'rei validate agents/skills/my-skill')
   .action(async (_options, skillPath) => {
     const result = await validateSkill(skillPath);
     console.log(result.message);
@@ -916,7 +915,7 @@ cli
 cli
   .command('refresh-docs')
   .description('Fetch latest Anthropic skill documentation')
-  .example('Update docs', 'skillutil refresh-docs')
+  .example('Update docs', 'rei refresh-docs')
   .action(async () => {
     const success = await refreshDocs();
     Deno.exit(success ? 0 : 1);
@@ -927,7 +926,7 @@ cli
   .command('activate <skill-name:string:deactivated-skill>')
   .alias('on')
   .description('Move skill from deactivated to active')
-  .example('Enable a skill', 'skillutil activate old-skill')
+  .example('Enable a skill', 'rei activate old-skill')
   .action(async (_options, skillName) => {
     const success = await activateSkill(skillName);
     Deno.exit(success ? 0 : 1);
@@ -938,7 +937,7 @@ cli
   .command('deactivate <skill-name:string:active-skill>')
   .alias('off')
   .description('Move skill from active to deactivated')
-  .example('Disable a skill', 'skillutil deactivate old-skill')
+  .example('Disable a skill', 'rei deactivate old-skill')
   .action(async (_options, skillName) => {
     const success = await deactivateSkill(skillName);
     Deno.exit(success ? 0 : 1);
@@ -950,8 +949,8 @@ cli
   .alias('ls')
   .description('List skills')
   .option('-a, --all', 'Include deactivated skills', { default: false })
-  .example('List active skills', 'skillutil list')
-  .example('List all skills', 'skillutil list --all')
+  .example('List active skills', 'rei list')
+  .example('List all skills', 'rei list --all')
   .action(async (options) => {
     const success = await listSkills(options.all);
     Deno.exit(success ? 0 : 1);
@@ -973,11 +972,11 @@ cli
   )
   .example(
     'Add a single skill',
-    'skillutil add https://github.com/user/repo/tree/main/skills/my-skill',
+    'rei add https://github.com/user/repo/tree/main/skills/my-skill',
   )
   .example(
     'Add all skills from a directory',
-    'skillutil add https://github.com/user/repo/tree/main/skills',
+    'rei add https://github.com/user/repo/tree/main/skills',
   )
   .action(async (options, githubUrl) => {
     const success = await addSkill(githubUrl, options.path);
