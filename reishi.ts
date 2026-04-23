@@ -32,7 +32,13 @@ if (!homeDir) throw new Error('HOME not set');
 
 // TODO: build `update` command with simple lock file for tracking like npx skills
 const SKILLS_DIR = join(homeDir, '.local/share/chezmoi/dot_agents/skills');
-const TEMPLATE_DIR = resolve('./assets/');
+// Resolve TEMPLATE_DIR relative to this script so it works both via `deno run`
+// from any CWD and in a compiled binary (where `assets/` is embedded via
+// `deno compile --include assets/`). `import.meta.dirname` points at the
+// script's directory in both cases.
+const TEMPLATE_DIR = import.meta.dirname
+  ? join(import.meta.dirname, 'assets')
+  : resolve('./assets');
 const SKILL_DEV_DIR = join(SKILLS_DIR, 'develop-agent-skills');
 const DEACTIVATED_SKILLS = join(SKILLS_DIR, '_deactivated');
 

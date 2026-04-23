@@ -267,13 +267,37 @@ async function main() {
       );
     })();
 
+    // Test 14: Init works when invoked from a CWD that is not the project root
+    // (regression test for the old `resolve('./assets/')` CWD-based bug —
+    // templates must resolve relative to the script dir so both `deno run`
+    // from any CWD and the compiled binary find embedded assets).
+    await test('Init works from an unrelated CWD', async () => {
+      const altCwd = await Deno.makeTempDir({ prefix: 'reishi-altcwd-' });
+      try {
+        const skillDir = join(tmpDir, 'cwd-independent-skill');
+        const result = await runrei(
+          ['init', 'cwd-independent-skill', '--path', tmpDir],
+          { cwd: altCwd },
+        );
+        if (result.code !== 0) {
+          console.log('   stderr:', result.stderr);
+          return false;
+        }
+        // SKILL.md was rendered from a template loaded via the script path,
+        // proving the template dir resolved correctly despite altCwd.
+        return await exists(join(skillDir, 'SKILL.md'));
+      } finally {
+        await cleanupTestDir(altCwd);
+      }
+    })();
+
     // Note: Activate/deactivate tests would require setting up the actual
     // chezmoi file system structure, which we avoid in isolated tests.
     // Those should be tested manually or in integration tests.
 
     // ---- Completions command tests (Cliffy CompletionsCommand) ----
 
-    // Test 14: completions fish outputs valid fish script
+    // Test 15: completions fish outputs valid fish script
     await test('completions fish outputs fish completion script', async () => {
       const result = await runrei(['completions', 'fish']);
       if (result.code !== 0) {
@@ -301,13 +325,13 @@ async function main() {
       return checks.every((c) => c);
     })();
 
-    // Test 15: completions fish outputs nothing to stderr
+    // Test 16: completions fish outputs nothing to stderr
     await test('completions fish writes only to stdout', async () => {
       const result = await runrei(['completions', 'fish']);
       return result.code === 0 && result.stderr === '';
     })();
 
-    // Test 16: completions bash outputs bash completion script
+    // Test 17: completions bash outputs bash completion script
     await test('completions bash outputs bash completion script', async () => {
       const result = await runrei(['completions', 'bash']);
       if (result.code !== 0) {
@@ -317,7 +341,7 @@ async function main() {
       return result.stdout.includes('rei') && result.stdout.includes('complete');
     })();
 
-    // Test 17: completions zsh outputs zsh completion script
+    // Test 18: completions zsh outputs zsh completion script
     await test('completions zsh outputs zsh completion script', async () => {
       const result = await runrei(['completions', 'zsh']);
       if (result.code !== 0) {
@@ -327,14 +351,14 @@ async function main() {
       return result.stdout.includes('rei') && result.stdout.includes('compdef');
     })();
 
-    // Test 18: completions with no shell arg shows help/error
+    // Test 19: completions with no shell arg shows help/error
     await test('completions with no shell arg fails', async () => {
       const result = await runrei(['completions']);
       // Cliffy CompletionsCommand should show help for available shells
       return result.code === 0 && result.stdout.includes('completions');
     })();
 
-    // Test 19: completions with invalid shell name fails
+    // Test 20: completions with invalid shell name fails
     await test('completions with invalid shell name fails', async () => {
       const result = await runrei(['completions', 'powershell']);
       return result.code !== 0;
@@ -347,7 +371,7 @@ async function main() {
     const configPath = join(configHome, 'config.toml');
     const configEnv = { HOME: configHome, REISHI_CONFIG: configPath };
 
-    // Test 20: rei config path prints the config path
+    // Test 21: rei config path prints the config path
     await test('config path prints a non-empty path ending in config.toml', async () => {
       const result = await runrei(['config', 'path'], { env: configEnv });
       if (result.code !== 0) {
@@ -358,7 +382,7 @@ async function main() {
       return line.length > 0 && line.endsWith('config.toml');
     })();
 
-    // Test 21: rei config init creates the config file
+    // Test 22: rei config init creates the config file
     await test('config init creates config file at REISHI_CONFIG', async () => {
       const result = await runrei(['config', 'init'], { env: configEnv });
       if (result.code !== 0) {
@@ -368,7 +392,7 @@ async function main() {
       return await exists(configPath);
     })();
 
-    // Test 22: rei config show prints valid TOML with expected keys
+    // Test 23: rei config show prints valid TOML with expected keys
     await test('config show prints TOML containing expected keys', async () => {
       const result = await runrei(['config', 'show'], { env: configEnv });
       if (result.code !== 0) {
@@ -382,7 +406,7 @@ async function main() {
       );
     })();
 
-    // Test 23: rei config init run twice shows friendly already-exists message
+    // Test 24: rei config init run twice shows friendly already-exists message
     await test('config init is idempotent with a friendly message', async () => {
       const result = await runrei(['config', 'init'], { env: configEnv });
       return (
