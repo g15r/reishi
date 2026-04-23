@@ -271,7 +271,7 @@ Rules are global, always-on markdown files that get symlinked/copied to agent ru
 - [x] Tab completion for rule names via `globalComplete('rule-name', …)` consumed by `rei rules remove`
 - [x] Tests: rules included in full sync, CLI flags wired, validation catches issues
 
-## Phase 6: Docs Management 🌀
+## Phase 6: Docs Management ✅
 
 ### Project-scoped doc fragments
 
@@ -297,11 +297,11 @@ Compile doc fragments into a single token-efficient AGENTS.md index file for a p
 
 ### Docs sync and project mapping
 
-- [ ] Config mapping: `[docs.projects.<name>]` table with `target` path override and `fragments` list
-- [ ] `rei docs sync [project]` — compile and sync docs for one or all mapped projects
-- [ ] Wire into `rei sync` for full-system sync (skills + rules + docs)
-- [ ] Respect `sync_method` hierarchy (global > docs > per-project)
-- [ ] Tests: project mapping resolves correctly, sync compiles and distributes, sync_method overrides work
+- [x] Config mapping: `[docs.projects.<name>]` table with `target` path override and `fragments` list
+- [x] `rei docs sync [project]` — compile and sync docs for one or all mapped projects (`--target`, `--method`, `--dry-run`)
+- [x] Wire into `rei sync` for full-system sync (skills + rules + docs, with `--docs-only`)
+- [x] Respect `sync_method` hierarchy (global > docs > CLI)
+- [x] Tests: project mapping resolves correctly, sync compiles and distributes, sync_method overrides work
 
 ## Backlog
 

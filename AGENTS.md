@@ -45,6 +45,7 @@ rei validate my-skill
 | `sync [skill-name]` | Pull upstream for tracked skills, then distribute skills and rules to configured targets (`--targets`, `--method`, `--dry-run`, `--status`, `--no-fetch`, `--force`, `--prefix-change`, `--rules-only`, `--skills-only`) |
 | `updates [skill-name]` | Check tracked skills for upstream changes (`--sync` to also pull) |
 | `rules <subcommand>` | Manage global markdown rules (`list`, `add`, `remove`, `sync`, `validate`) |
+| `docs <subcommand>` | Manage project-scoped doc fragments and compile a token-efficient AGENTS.md index (`list`, `add`, `remove`, `compile`, `sync`) |
 
 ## Command Details
 
@@ -260,7 +261,63 @@ claude = "~/.claude/rules"
 
 **Method resolution** (highest wins): CLI `--method` > `[rules].sync_method` > global `sync_method`.
 
-**Integration with `rei sync`**: `rei sync` (no arg) syncs both skills and rules. `rei sync <skill-name>` narrows to that skill and skips rules. `rei sync --rules-only` and `rei sync --skills-only` restrict to one content type. On full success the summary collapses to `✨ Synced N skills and M rules across K targets`.
+**Integration with `rei sync`**: `rei sync` (no arg) syncs skills, rules, and every configured doc project. `rei sync <skill-name>` narrows to that skill and skips rules and docs. `rei sync --rules-only`, `rei sync --skills-only`, and `rei sync --docs-only` each restrict to one content type (mutually exclusive). On full success the summary collapses to `✨ Synced N skills, M rules, and K doc projects across T targets`.
+
+### docs
+
+Docs are **project-scoped** markdown fragments. Each subdirectory of `docs.source` represents a doc project, and each `.md` file inside is a fragment. Unlike skills and rules, docs are distributed to real project directories on disk (not to shared user-level agent paths): the compiled index lands at `<target>/<index_filename>` (default `AGENTS.md`), and fragments land under `<target>/<docs.default_target>/` (default `.agents/docs/`).
+
+```bash
+# List doc projects (and their fragment counts)
+deno task cli docs list
+
+# List fragments in a project
+deno task cli docs list myproject
+
+# Add a fragment from a local file, a URL, or a GitHub tree URL pointing at a single file
+deno task cli docs add myproject ./api-conventions.md
+deno task cli docs add myproject https://example.com/docs/api.md
+deno task cli docs add myproject https://github.com/org/repo/tree/main/docs/api.md
+
+# Re-adding requires --force
+deno task cli docs add myproject ./api-conventions.md --force
+
+# Remove a fragment from docs.source (does NOT cascade to targets — re-sync to propagate)
+deno task cli docs remove myproject api-conventions.md
+
+# Compile an AGENTS.md index + distribute fragments to an arbitrary target dir
+deno task cli docs compile myproject ~/code/myproject
+deno task cli docs compile myproject ~/code/myproject --stdout   # preview the index
+deno task cli docs compile myproject ~/code/myproject --dry-run
+
+# Sync every configured [docs.projects] entry
+deno task cli docs sync
+
+# Sync a single configured project (or ad-hoc with --target)
+deno task cli docs sync myproject
+deno task cli docs sync myproject --target ~/code/myproject
+```
+
+**Config**:
+
+```toml
+[docs]
+source = "~/.config/reishi/docs"     # where fragments live, organized by project subdir
+default_target = ".agents/docs"      # per-project subdir for distributed fragments
+index_filename = "AGENTS.md"         # name of the compiled index file at the project root
+# sync_method = "symlink"            # optional override; inherits global sync_method
+# token_budget = 4000                # soft cap on the index size (chars/4 approximation)
+
+[docs.projects.myproject]
+target = "~/code/myproject"
+# fragments = ["api-conventions.md", "testing.md"]   # optional subset
+```
+
+**Index format**: one heading per fragment, a one-line description (frontmatter `description` field > first non-heading paragraph > first heading), and a single relative link to the fragment under the target's `<docs.default_target>/` subdir. Fragments are ordered by frontmatter `priority` descending, then alphabetically. When the token budget would be exceeded, remaining fragments are replaced with a terse `(... N more fragments omitted)` line.
+
+**Method resolution** (highest wins): CLI `--method` > `[docs].sync_method` > global `sync_method`.
+
+**Auto-sync on `rei sync`**: any project listed under `[docs.projects]` is compiled and distributed as part of `rei sync` (no argument). Use `--docs-only` to run just the docs pass.
 
 ## Testing
 

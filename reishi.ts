@@ -57,6 +57,7 @@ import {
   listDocProjects,
   listFragments,
   removeFragment,
+  syncDocs,
 } from './docs.ts';
 
 // ============================================================================
@@ -1400,14 +1401,22 @@ cli
     '--prefix-change <mode:string>',
     'How to handle a changed prefix non-interactively: rename | parallel | abort',
   )
-  .option('--rules-only', 'Sync only rules, skip skills', { conflicts: ['skills-only'] })
-  .option('--skills-only', 'Sync only skills, skip rules', { conflicts: ['rules-only'] })
-  .example('Sync everything (skills + rules)', 'rei sync')
+  .option('--rules-only', 'Sync only rules, skip skills and docs', {
+    conflicts: ['skills-only', 'docs-only'],
+  })
+  .option('--skills-only', 'Sync only skills, skip rules and docs', {
+    conflicts: ['rules-only', 'docs-only'],
+  })
+  .option('--docs-only', 'Sync only docs, skip skills and rules', {
+    conflicts: ['rules-only', 'skills-only'],
+  })
+  .example('Sync everything (skills + rules + docs)', 'rei sync')
   .example('Sync one skill', 'rei sync book-review')
   .example('Sync to a subset of targets', 'rei sync --targets=claude,agents')
   .example('Show staleness report', 'rei sync --status')
   .example('Skip upstream pull', 'rei sync --no-fetch')
   .example('Sync only rules', 'rei sync --rules-only')
+  .example('Sync only docs', 'rei sync --docs-only')
   .action(async (options, skillName) => {
     void maybeNotifyOfUpdates();
     if (options.status) {
@@ -1457,10 +1466,11 @@ cli
       prefixChange,
     };
 
-    // A specific skill name always means "skill sync only" — rules don't have
-    // per-item targeting.
-    const doSkills = !options.rulesOnly;
-    const doRules = !options.skillsOnly && !skillName;
+    // A specific skill name always means "skill sync only" — rules and docs
+    // don't support per-skill targeting.
+    const doSkills = !options.rulesOnly && !options.docsOnly;
+    const doRules = !options.skillsOnly && !options.docsOnly && !skillName;
+    const doDocs = !options.skillsOnly && !options.rulesOnly && !skillName;
 
     const skillResults = doSkills
       ? (skillName
@@ -1474,29 +1484,65 @@ cli
         dryRun: options.dryRun,
       })
       : [];
+    const config = await loadConfig();
+    const docsProjects = config.docs.projects ?? {};
+    const docsRuns = doDocs && Object.keys(docsProjects).length > 0
+      ? await syncDocs({ method, dryRun: options.dryRun })
+      : [];
 
-    // Unified summary when both content types participated and everything
+    // Unified summary when multiple content types participated and everything
     // succeeded; otherwise fall back to the per-type printers.
     const anyFail = skillResults.some((r) => r.action === 'failed') ||
-      ruleResults.some((r) => r.action === 'failed');
-    if (
-      doSkills && doRules && !anyFail &&
-      skillResults.length > 0 && ruleResults.length > 0
-    ) {
+      ruleResults.some((r) => r.action === 'failed') ||
+      docsRuns.some((r) => r.result.action === 'failed');
+    const participatingTypes = [
+      skillResults.length > 0,
+      ruleResults.length > 0,
+      docsRuns.length > 0,
+    ].filter(Boolean).length;
+
+    if (participatingTypes > 1 && !anyFail) {
       const skillNames = new Set(skillResults.map((r) => r.skillName));
       const ruleNames = new Set(ruleResults.map((r) => r.ruleName));
-      const targetNames = new Set([
+      const docProjects = new Set(docsRuns.map((r) => r.project));
+      const targetNames = new Set<string>([
         ...skillResults.map((r) => r.target),
         ...ruleResults.map((r) => r.target),
+        ...docsRuns.map((r) => r.target),
       ]);
+      const parts: string[] = [];
+      if (skillNames.size > 0) {
+        parts.push(`${skillNames.size} skill${skillNames.size === 1 ? '' : 's'}`);
+      }
+      if (ruleNames.size > 0) {
+        parts.push(`${ruleNames.size} rule${ruleNames.size === 1 ? '' : 's'}`);
+      }
+      if (docProjects.size > 0) {
+        parts.push(`${docProjects.size} doc project${docProjects.size === 1 ? '' : 's'}`);
+      }
+      const joined = parts.length === 1
+        ? parts[0]
+        : parts.length === 2
+        ? parts.join(' and ')
+        : `${parts.slice(0, -1).join(', ')}, and ${parts[parts.length - 1]}`;
       console.log(
-        `${green('✨ Synced')} ${skillNames.size} skill${skillNames.size === 1 ? '' : 's'} and ${ruleNames.size} rule${
-          ruleNames.size === 1 ? '' : 's'
-        } across ${targetNames.size} target${targetNames.size === 1 ? '' : 's'}`,
+        `${green('✨ Synced')} ${joined} across ${targetNames.size} target${
+          targetNames.size === 1 ? '' : 's'
+        }`,
       );
     } else {
       if (skillResults.length > 0) printSummary(skillResults);
       if (ruleResults.length > 0) printRulesSummary(ruleResults);
+      for (const run of docsRuns) {
+        console.log(
+          formatCompileSummary(
+            run.project,
+            run.result,
+            config.docs.index_filename,
+            config.docs.default_target,
+          ),
+        );
+      }
     }
 
     Deno.exit(anyFail ? 1 : 0);
@@ -1771,6 +1817,61 @@ const docsCommand = new Command()
       ),
     );
     Deno.exit(result.action === 'failed' ? 1 : 0);
+  })
+  .command('sync [project:string:doc-project]')
+  .description('Compile and distribute docs for one or all configured projects')
+  .option('--target <path:string>', 'Override the target project root (requires <project>)')
+  .option('--method <method:string>', 'Override sync method: copy or symlink')
+  .option('--dry-run', 'Plan only — do not write')
+  .example('Sync all configured projects', 'rei docs sync')
+  .example('Sync one configured project', 'rei docs sync myproject')
+  .example(
+    'Sync a project with an ad-hoc target',
+    'rei docs sync myproject --target ~/code/myproject',
+  )
+  .action(async (options, project) => {
+    let method: 'copy' | 'symlink' | undefined;
+    if (options.method) {
+      if (options.method === 'copy' || options.method === 'symlink') {
+        method = options.method;
+      } else {
+        console.error(`${red('❌ Error:')} --method must be 'copy' or 'symlink'`);
+        Deno.exit(1);
+      }
+    }
+    try {
+      const runs = await syncDocs({
+        project,
+        targetOverride: options.target,
+        method,
+        dryRun: options.dryRun,
+      });
+      if (runs.length === 0) {
+        console.log(
+          `${yellow('⚠ No doc projects configured')} ${
+            dim(italic('— add a [docs.projects.<name>] table to your config'))
+          }`,
+        );
+        Deno.exit(0);
+      }
+      const config = await loadConfig();
+      for (const run of runs) {
+        console.log(
+          formatCompileSummary(
+            run.project,
+            run.result,
+            config.docs.index_filename,
+            config.docs.default_target,
+          ),
+        );
+      }
+      const anyFail = runs.some((r) => r.result.action === 'failed');
+      Deno.exit(anyFail ? 1 : 0);
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      console.error(`${red('❌ Error:')} ${message}`);
+      Deno.exit(1);
+    }
   });
 
 cli.command('docs', docsCommand);

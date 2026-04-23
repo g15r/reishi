@@ -19,6 +19,7 @@ import {
   listDocProjects,
   listFragments,
   removeFragment,
+  syncDocs,
 } from './docs.ts';
 import {
   fakeFetchGithub,
@@ -546,6 +547,144 @@ Deno.test('compileToTarget: re-compile clears stale fragments', async () => {
       await compileToTarget('myproject-a', env.projectDir);
       const staleCopy = join(env.projectDir, '.agents', 'docs', 'testing.md');
       assert(!(await exists(staleCopy)));
+    });
+  } finally {
+    await env.cleanup();
+  }
+});
+
+// ============================================================================
+// syncDocs — respects [docs.projects] mapping
+// ============================================================================
+
+Deno.test('syncDocs: compiles and writes to configured target', async () => {
+  const env = await setupIsolatedEnv();
+  try {
+    await withEnv(env.env, async () => {
+      await seedDocsSource(env.docsDir);
+      await patchConfig(env.configPath, {
+        docs: {
+          source: env.docsDir,
+          default_target: '.agents/docs',
+          index_filename: 'AGENTS.md',
+          projects: {
+            'myproject-a': { target: env.projectDir },
+          },
+        },
+      });
+      resetPathCache();
+
+      const runs = await syncDocs();
+      assertEquals(runs.length, 1);
+      assertEquals(runs[0].project, 'myproject-a');
+      assertEquals(runs[0].result.action, 'copied');
+      assert(await exists(join(env.projectDir, 'AGENTS.md')));
+    });
+  } finally {
+    await env.cleanup();
+  }
+});
+
+Deno.test('syncDocs: fragments filter limits what gets distributed', async () => {
+  const env = await setupIsolatedEnv();
+  try {
+    await withEnv(env.env, async () => {
+      await seedDocsSource(env.docsDir);
+      await patchConfig(env.configPath, {
+        docs: {
+          source: env.docsDir,
+          default_target: '.agents/docs',
+          index_filename: 'AGENTS.md',
+          projects: {
+            'myproject-a': {
+              target: env.projectDir,
+              fragments: ['api-conventions.md'],
+            },
+          },
+        },
+      });
+      resetPathCache();
+
+      await syncDocs();
+      assert(await exists(join(env.projectDir, '.agents', 'docs', 'api-conventions.md')));
+      assert(
+        !(await exists(join(env.projectDir, '.agents', 'docs', 'testing.md'))),
+      );
+    });
+  } finally {
+    await env.cleanup();
+  }
+});
+
+Deno.test('syncDocs: iterates multiple configured projects', async () => {
+  const env = await setupIsolatedEnv();
+  try {
+    await withEnv(env.env, async () => {
+      await seedDocsSource(env.docsDir);
+      const projectB = join(env.home, 'projects', 'b');
+      await patchConfig(env.configPath, {
+        docs: {
+          source: env.docsDir,
+          default_target: '.agents/docs',
+          index_filename: 'AGENTS.md',
+          projects: {
+            'myproject-a': { target: env.projectDir },
+            'myproject-b': { target: projectB },
+          },
+        },
+      });
+      resetPathCache();
+
+      const runs = await syncDocs();
+      assertEquals(runs.length, 2);
+      assert(await exists(join(env.projectDir, 'AGENTS.md')));
+      assert(await exists(join(projectB, 'AGENTS.md')));
+    });
+  } finally {
+    await env.cleanup();
+  }
+});
+
+Deno.test('syncDocs: project without config entry and no --target throws', async () => {
+  const env = await setupIsolatedEnv();
+  try {
+    await withEnv(env.env, async () => {
+      await seedDocsSource(env.docsDir);
+      await assertRejects(
+        () => syncDocs({ project: 'myproject-a' }),
+        Error,
+        'pass --target to override',
+      );
+    });
+  } finally {
+    await env.cleanup();
+  }
+});
+
+Deno.test('syncDocs: targetOverride works when project has no config entry', async () => {
+  const env = await setupIsolatedEnv();
+  try {
+    await withEnv(env.env, async () => {
+      await seedDocsSource(env.docsDir);
+      const runs = await syncDocs({
+        project: 'myproject-a',
+        targetOverride: env.projectDir,
+      });
+      assertEquals(runs.length, 1);
+      assert(await exists(join(env.projectDir, 'AGENTS.md')));
+    });
+  } finally {
+    await env.cleanup();
+  }
+});
+
+Deno.test('syncDocs: no projects configured returns empty', async () => {
+  const env = await setupIsolatedEnv();
+  try {
+    await withEnv(env.env, async () => {
+      await seedDocsSource(env.docsDir);
+      const runs = await syncDocs();
+      assertEquals(runs.length, 0);
     });
   } finally {
     await env.cleanup();
