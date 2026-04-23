@@ -208,7 +208,7 @@ Core engine for distributing skills from source to named targets.
 - [x] `init` places new skill in source and syncs (only when `--path` resolves to source)
 - [x] Tests: end-to-end add-then-verify-targets, custom `--path` does not propagate, multi-skill add syncs every skill, deactivate/activate round-trip (`sync_integration_test.ts`)
 
-## Phase 4: Sync Updates and Prefix Changes 🌀
+## Phase 4: Sync Updates and Prefix Changes ✅
 
 ### `rei sync` for tracked skills
 
@@ -241,16 +241,16 @@ When a user changes the `prefix` in a skill's config entry, the next sync must h
 
 Background check for upstream changes on tracked skills.
 
-- [ ] Write `checkForUpdates()` — for each tracked skill, fetch the latest commit SHA or tarball hash for the skill's `ref` and compare against stored state
-- [ ] Store `last_check` and `remote_hash` in config per skill
-- [ ] `rei updates` — manually trigger check, report which skills have upstream changes
-- [ ] `rei updates --sync` — check and immediately sync any that have changes
-- [ ] Configurable via `[updates]` table: `enabled`, `interval_hours`
-- [ ] When enabled, `rei` commands (list, sync, etc.) check if `interval_hours` has elapsed since `last_check` and run a background check — print a non-blocking notification if updates are available
-- [ ] Per-skill override: `[skills.<name>] updates = false` disables polling for that skill
-- [ ] Tests: update check detects new upstream commits, respects interval, per-skill disable works, notification display, `--sync` triggers sync
+- [x] `checkForUpdates(skillName?)` — fetches the GitHub commits-API SHA for each tracked skill's `ref` and compares against stored `remote_hash`
+- [x] `SkillEntry` extended with optional `last_check` (ISO) and `remote_hash` (SHA)
+- [x] `rei updates [skill-name]` — manually trigger check, report which skills have upstream changes
+- [x] `rei updates --sync` — check and immediately sync any that have changes (with upstream fetch enabled)
+- [x] Configurable via `[updates]` table: `enabled`, `interval_hours`, `last_background_check`
+- [x] Background check fires fire-and-forget on `rei list`, `rei sync`, `rei config show`, and `rei validate`; prints a one-liner if updates are available, never blocks
+- [x] Per-skill override: `[skills.<name>] updates = false` disables polling for that skill
+- [x] Tests: update check detects new upstream commits, respects interval, per-skill disable works, `[updates].enabled = false` disables all polling (`updates_test.ts`)
 
-## Phase 5: Rules Management
+## Phase 5: Rules Management 🌀
 
 ### Rules directory structure and sync
 

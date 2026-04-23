@@ -42,7 +42,8 @@ rei validate my-skill
 | `add <github-url>` | Install a skill or directory of skills from GitHub (alias: `a`, track with `-t`, prefix with `-p`) |
 | `list <skill-name>` | List all active skills (alias: `ls`, include deactivated with `-a/--all`) |
 | `config <subcommand>` | Inspect and manage the reishi config (`init`, `show`, `path`, `edit`) |
-| `sync [skill-name]` | Distribute skills from the source of truth to configured targets (`--targets`, `--method`, `--dry-run`, `--status`) |
+| `sync [skill-name]` | Pull upstream for tracked skills, then distribute to configured targets (`--targets`, `--method`, `--dry-run`, `--status`, `--no-fetch`, `--force`, `--prefix-change`) |
+| `updates [skill-name]` | Check tracked skills for upstream changes (`--sync` to also pull) |
 
 ## Command Details
 
@@ -157,10 +158,10 @@ deno task cli activate old-skill
 
 ### sync
 
-Distribute skills from the source of truth to configured targets by copy or symlink:
+Sync runs in two phases: (1) for tracked skills, re-fetch from upstream and overwrite the source; (2) distribute the source to every configured target by copy or symlink. Untracked skills skip phase 1 and just do target sync.
 
 ```bash
-# Sync everything (all active skills → every configured target)
+# Sync everything (re-fetch tracked, redistribute everything to all targets)
 deno task cli sync
 
 # Sync a single skill
@@ -172,8 +173,17 @@ deno task cli sync --targets=claude,agents
 # Override sync method (config default is "copy")
 deno task cli sync --method=symlink
 
-# Plan only — show what would happen without writing
+# Plan only — show what would happen without writing (includes upstream preview)
 deno task cli sync --dry-run
+
+# Skip the upstream fetch entirely (Phase 3 target-only behavior)
+deno task cli sync --no-fetch
+
+# Bypass the local-modification confirmation prompt
+deno task cli sync --force
+
+# Pre-decide a prefix change non-interactively
+deno task cli sync --prefix-change=rename   # or =parallel, =abort
 
 # Staleness report (present / fresh / stale / missing / symlink, per skill × target)
 deno task cli sync --status
@@ -183,7 +193,28 @@ deno task cli sync --status
 
 **Per-skill target filter**: `[skills.<name>].targets = ["claude"]` restricts a skill to those named targets from `[paths.targets]`.
 
-**Auto-sync**: `add`, `activate`, `deactivate`, and `init` (when scaffolding inside the source dir) trigger sync automatically. If no targets are configured or the target parent dir is missing, the sync is a silent no-op. `deactivate` removes the skill from every target.
+**Auto-sync**: `add`, `activate`, `deactivate`, and `init` (when scaffolding inside the source dir) trigger sync automatically with `--no-fetch` semantics — they never pull upstream. Only the user-facing `rei sync` command pulls. If no targets are configured or the target parent dir is missing, the sync is a silent no-op. `deactivate` removes the skill from every target.
+
+**Prefix changes**: editing `[skills.<name>].prefix` to a new value triggers a two-stage prompt on the next sync (confirm → rename / parallel / abort). Rename moves the source dir, the deactivated dir, and every target dir, then re-keys the config table. Parallel preserves the old skill in place and the upstream fetch populates the new dir under the new name. Use `--prefix-change` for non-interactive resolution.
+
+### updates
+
+Poll tracked skills for upstream changes without pulling:
+
+```bash
+# Check every tracked skill
+deno task cli updates
+
+# Check one
+deno task cli updates book-review
+
+# Check, then sync any that have new upstream commits
+deno task cli updates --sync
+```
+
+Reishi stores the latest seen upstream SHA in `[skills.<name>].remote_hash` and the time of last check in `last_check`. Disable polling for a single skill with `[skills.<name>].updates = false`.
+
+**Background notifications**: when `[updates].enabled = true` and `interval_hours` has elapsed since `[updates].last_background_check`, `rei list`, `rei sync`, `rei validate`, and `rei config show` fire a non-blocking background check and print a one-liner if any tracked skills have upstream updates: `✨ N skills have upstream updates — run rei updates for details`. The check is fire-and-forget — it never delays the main command.
 
 ## Testing
 
