@@ -1,6 +1,6 @@
 # reishi v1 Roadmap
 
-## Phase 1: Config Foundation 🌀
+## Phase 1: Config Foundation ✅
 
 ### Config file format and schema
 
@@ -29,13 +29,13 @@ A `rei config` command for inspecting and modifying config from the terminal.
 
 Establish `deno compile` as the build pipeline for producing single portable binaries, and wire it into a GitHub Actions release workflow for the Supermodel Labs Homebrew tap.
 
-- [ ] Add `deno task compile` to `deno.json` — compiles for the current platform with `--include assets/` to embed templates, output binary named `rei`
-- [ ] Add `deno task compile:all` — cross-compiles for all four targets, renames outputs to Homebrew-releaser's `{os}-{arch}` convention (`darwin-arm64`, `darwin-amd64`, `linux-arm64`, `linux-amd64`). Deno uses different target names (`aarch64-apple-darwin` = `darwin-arm64`, `x86_64-apple-darwin` = `darwin-amd64`, etc.) so the task or a shell step must map between them.
-- [ ] Verify embedded `assets/` templates resolve correctly at runtime from the compiled binary (same relative paths)
-- [ ] Verify baked-in permission flags work as expected in the compiled binary
-- [ ] GitHub Actions release workflow (`.github/workflows/release.yml`): triggered on release publish, uses `denoland/setup-deno`, runs `compile:all`, packages each binary as `reishi-{version}-{os}-{arch}.tar.gz` with the binary renamed to `rei` inside the tarball, uploads via `gh release upload`. Reference `winline`'s workflow for the exact pattern.
-- [ ] Homebrew-releaser step (`Justintime50/homebrew-releaser@v3`): `homebrew_owner: supermodellabs`, `homebrew_tap: homebrew-tap`, `install: 'bin.install "rei"'`, all four targets enabled, `update_readme_table: true`
-- [ ] Tests: compiled binary runs `--help`, `init`, `validate`, and `add` correctly (smoke tests against the binary artifact, not `deno run`)
+- [x] Add `deno task compile` to `deno.json` — compiles for the current platform with `--include assets/` to embed templates, output binary named `rei`
+- [x] Add `deno task compile:all` — cross-compiles for all four targets via `scripts/compile-all.sh`, renames outputs to Homebrew-releaser's `{os}-{arch}` convention (`darwin-arm64`, `darwin-amd64`, `linux-arm64`, `linux-amd64`). Deno uses different target names (`aarch64-apple-darwin` = `darwin-arm64`, `x86_64-apple-darwin` = `darwin-amd64`, etc.); the script maps between them.
+- [x] Verify embedded `assets/` templates resolve correctly at runtime from the compiled binary (fixed the underlying CWD-based asset path bug — templates now resolve relative to the script via `import.meta.dirname`)
+- [x] Verify baked-in permission flags work as expected in the compiled binary (smoke tests exercise the binary's embedded shebang perms)
+- [x] GitHub Actions release workflow (`.github/workflows/release.yml`): triggered on release publish, uses `denoland/setup-deno@v2`, runs `compile:all`, packages each binary as `reishi-{tag}-{os}-{arch}.tar.gz` with the binary renamed to `rei` inside the tarball, uploads via `gh release upload`.
+- [x] Homebrew-releaser step (`Justintime50/homebrew-releaser@v3`): `homebrew_owner: supermodellabs`, `homebrew_tap: homebrew-tap`, `install: 'bin.install "rei"'`, all four `target_*` flags enabled, `update_readme_table: true`.
+- [x] Tests: `compile_test.ts` runs `--help`, `--version`, `init`, and `validate` against the compiled `bin/rei` artifact (not `deno run`). Wired into `deno task test` via `deno task test:compile`. `add` is not covered because it requires live network to GitHub; that path is already exercised by the `deno run` suite.
 
 ### Config schema spec
 
@@ -118,7 +118,7 @@ index_filename = "AGENTS.md"
 
 Per-skill overrides are stored in the `[skills.<name>]` table and documented in Phase 2.
 
-## Phase 2: Tracked Skills — `--track` and `--prefix` Flags
+## Phase 2: Tracked Skills — `--track` and `--prefix` Flags 🌀
 
 ### `--track` (`-t`) flag
 

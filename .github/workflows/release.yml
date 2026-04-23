@@ -1,0 +1,59 @@
+name: release
+
+# Fires when a GitHub release is published (either manually in the UI or via
+# `gh release create --target <tag>`). Draft releases do NOT trigger this.
+on:
+  release:
+    types: [published]
+
+# `contents: write` is required for `gh release upload` (attaching tarballs
+# to the published release). The homebrew-releaser step uses its own PAT
+# (HOMEBREW_TAP_GITHUB_TOKEN) because it pushes to a different repo.
+permissions:
+  contents: write
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Deno
+        uses: denoland/setup-deno@v2
+        with:
+          deno-version: v2.x
+
+      - name: Cross-compile all targets
+        run: deno task compile:all
+
+      - name: Package tarballs
+        env:
+          TAG: ${{ github.event.release.tag_name }}
+        run: |
+          set -euo pipefail
+          for target in darwin-arm64 darwin-amd64 linux-arm64 linux-amd64; do
+            cp "bin/rei-${target}" bin/rei
+            tar -czf "reishi-${TAG}-${target}.tar.gz" -C bin rei
+            rm bin/rei
+          done
+          ls -la reishi-*.tar.gz
+
+      - name: Upload release assets
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          TAG: ${{ github.event.release.tag_name }}
+        run: gh release upload "$TAG" reishi-*.tar.gz
+
+      - name: Publish to Homebrew tap
+        uses: Justintime50/homebrew-releaser@v3
+        with:
+          homebrew_owner: supermodellabs
+          homebrew_tap: homebrew-tap
+          install: 'bin.install "rei"'
+          target_darwin_amd64: true
+          target_darwin_arm64: true
+          target_linux_amd64: true
+          target_linux_arm64: true
+          update_readme_table: true
+          github_token: ${{ secrets.HOMEBREW_TAP_GITHUB_TOKEN }}
