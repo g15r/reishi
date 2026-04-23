@@ -228,13 +228,14 @@ Pull latest from upstream for tracked skills and update the source of truth.
 
 When a user changes the `prefix` in a skill's config entry, the next sync must handle the rename.
 
-- [ ] On sync, compare current directory name prefix against config `prefix` — detect mismatches
-- [ ] Prompt 1: "Prefix for X changed from 'readwiseio' to 'readwise'. Confirm?" (y/n)
-- [ ] Prompt 2 (on confirm): "Add new prefixed skills alongside old ones, or replace old skills?" — two options:
-  - **Replace**: rename existing skill directories, update all target symlinks/copies
-  - **Parallel**: install with new prefix, keep old ones (user cleans up manually)
-- [ ] Update config entries to reflect new prefix after confirmed change
-- [ ] Tests: prefix mismatch detected, both replace and parallel flows work correctly, config updated after rename, targets reflect changes
+- [x] On sync, compare current directory name prefix against config `prefix` — detect mismatches
+- [x] Prompt 1: "Prefix for X changed from 'readwiseio' to 'readwise'. Confirm?" (y/N)
+- [x] Prompt 2 (on confirm): "Rename existing or install in parallel?" (r/p/N)
+  - **Rename**: rename source dir + deactivated dir + every target dir, re-key the config table
+  - **Parallel**: leave the old skill in place; new entry created and populated by the upstream fetch
+- [x] Non-interactive `--prefix-change rename|parallel|abort` flag pre-decides the resolution
+- [x] Dry-run preview shows the would-be rename without writing
+- [x] Tests: rename + parallel + abort + dry-run + no-op (`sync_prefix_test.ts`)
 
 ### Update polling
 
