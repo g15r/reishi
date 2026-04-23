@@ -250,7 +250,7 @@ Background check for upstream changes on tracked skills.
 - [x] Per-skill override: `[skills.<name>] updates = false` disables polling for that skill
 - [x] Tests: update check detects new upstream commits, respects interval, per-skill disable works, `[updates].enabled = false` disables all polling (`updates_test.ts`)
 
-## Phase 5: Rules Management 🌀
+## Phase 5: Rules Management ✅
 
 ### Rules directory structure and sync
 
@@ -266,12 +266,12 @@ Rules are global, always-on markdown files that get symlinked/copied to agent ru
 
 ### Rules integration with existing workflow
 
-- [ ] Wire rules sync into `rei sync` (sync everything: skills + rules)
-- [ ] `rei rules validate` — check rules files are valid markdown with no broken links
-- [ ] Tab completion for rule names
-- [ ] Tests: rules included in full sync, validation catches issues
+- [x] Wire rules sync into `rei sync` (sync everything: skills + rules, with `--rules-only` / `--skills-only` to narrow)
+- [x] `rei rules validate` — check rules files are valid markdown with no broken relative links
+- [x] Tab completion for rule names via `globalComplete('rule-name', …)` consumed by `rei rules remove`
+- [x] Tests: rules included in full sync, CLI flags wired, validation catches issues
 
-## Phase 6: Docs Management
+## Phase 6: Docs Management 🌀
 
 ### Project-scoped doc fragments
 

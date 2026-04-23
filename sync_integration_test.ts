@@ -209,5 +209,138 @@ Deno.test('activate flow: syncSkill re-adds to target after reactivation', async
   }
 });
 
+/**
+ * Invoke the CLI via `deno run reishi.ts` with env overrides. The integration
+ * tests above drive exported functions directly; these exercise CLI flag
+ * wiring end-to-end.
+ */
+async function runCli(
+  args: string[],
+  env: Record<string, string>,
+): Promise<{ code: number; stdout: string; stderr: string }> {
+  const scriptPath = new URL('./reishi.ts', import.meta.url).pathname;
+  // Inherit PATH + DENO_DIR so the subprocess can find `deno` and reuse caches.
+  const childEnv: Record<string, string> = { ...env };
+  for (const key of ['PATH', 'DENO_DIR', 'XDG_CACHE_HOME', 'USER']) {
+    const v = Deno.env.get(key);
+    if (v !== undefined) childEnv[key] = v;
+  }
+  const cmd = new Deno.Command('deno', {
+    args: [
+      'run',
+      '--allow-read',
+      '--allow-write',
+      '--allow-env=HOME,TMPDIR,EDITOR,REISHI_CONFIG',
+      '--allow-net',
+      '--allow-run',
+      scriptPath,
+      ...args,
+    ],
+    env: childEnv,
+    stdout: 'piped',
+    stderr: 'piped',
+  });
+  const { code, stdout, stderr } = await cmd.output();
+  return {
+    code,
+    stdout: new TextDecoder().decode(stdout),
+    stderr: new TextDecoder().decode(stderr),
+  };
+}
+
+async function seedSkillAndRule(env: Awaited<ReturnType<typeof setupIsolatedEnv>>): Promise<void> {
+  await ensureTargetParents(env.home);
+  // Skill
+  const skillDir = join(env.sourceDir, 'alpha');
+  await Deno.mkdir(join(skillDir, 'scripts'), { recursive: true });
+  await Deno.writeTextFile(
+    join(skillDir, 'SKILL.md'),
+    '---\nname: alpha\ndescription: test\n---\n',
+  );
+  // Rule
+  const rulesDir = join(env.home, '.config', 'reishi', 'rules');
+  await Deno.mkdir(rulesDir, { recursive: true });
+  await Deno.writeTextFile(join(rulesDir, 'no-deletes.md'), '# No Deletes\n');
+}
+
+Deno.test('rei sync (no args): syncs both skills and rules', async () => {
+  const env = await setupIsolatedEnv();
+  try {
+    await seedSkillAndRule(env);
+    const { code, stdout, stderr } = await runCli(['sync', '--no-fetch'], env.env);
+    assertEquals(code, 0, `stderr: ${stderr}`);
+    assert(
+      stdout.includes('skill') && stdout.includes('rule'),
+      `expected unified summary to mention skills and rules: ${stdout}`,
+    );
+    assert(await exists(join(env.home, '.claude', 'skills', 'alpha', 'SKILL.md')));
+    assert(await exists(join(env.home, '.claude', 'rules', 'no-deletes.md')));
+  } finally {
+    await env.cleanup();
+  }
+});
+
+Deno.test('rei sync --skills-only: rules are untouched', async () => {
+  const env = await setupIsolatedEnv();
+  try {
+    await seedSkillAndRule(env);
+    const { code, stderr } = await runCli(['sync', '--skills-only', '--no-fetch'], env.env);
+    assertEquals(code, 0, `stderr: ${stderr}`);
+    assert(await exists(join(env.home, '.claude', 'skills', 'alpha')));
+    assert(!(await exists(join(env.home, '.claude', 'rules'))));
+  } finally {
+    await env.cleanup();
+  }
+});
+
+Deno.test('rei sync --rules-only: skills are untouched', async () => {
+  const env = await setupIsolatedEnv();
+  try {
+    await seedSkillAndRule(env);
+    const { code, stderr } = await runCli(['sync', '--rules-only'], env.env);
+    assertEquals(code, 0, `stderr: ${stderr}`);
+    assert(!(await exists(join(env.home, '.claude', 'skills', 'alpha'))));
+    assert(await exists(join(env.home, '.claude', 'rules', 'no-deletes.md')));
+  } finally {
+    await env.cleanup();
+  }
+});
+
+Deno.test('syncAll + syncRules: both content types land at their respective targets', async () => {
+  const { syncAll } = await import('./sync.ts');
+  const { addRule, syncRules } = await import('./rules.ts');
+  const { fixturesPath } = await import('./test-helpers.ts');
+  const env = await setupIsolatedEnv();
+  try {
+    await withEnv(env.env, async () => {
+      // Skills target parent
+      await ensureTargetParents(env.home);
+      // Rules target parent — config's default puts it at <home>/.claude/rules
+      // so .claude already exists from ensureTargetParents.
+
+      // Seed a skill directly.
+      const skillDir = join(env.sourceDir, 'alpha');
+      await Deno.mkdir(join(skillDir, 'scripts'), { recursive: true });
+      await Deno.writeTextFile(
+        join(skillDir, 'SKILL.md'),
+        '---\nname: alpha\ndescription: test\n---\n',
+      );
+
+      // Seed a rule from the repo fixtures.
+      await addRule(fixturesPath('rules', 'no-deletes.md'));
+
+      const skillResults = await syncAll();
+      const ruleResults = await syncRules();
+
+      assert(skillResults.some((r) => r.action === 'copied'));
+      assert(ruleResults.some((r) => r.action === 'copied'));
+      assert(await exists(join(env.home, '.claude', 'skills', 'alpha', 'SKILL.md')));
+      assert(await exists(join(env.home, '.claude', 'rules', 'no-deletes.md')));
+    });
+  } finally {
+    await env.cleanup();
+  }
+});
+
 // Avoid unused-import warning for dirname.
 void dirname;

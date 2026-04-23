@@ -42,8 +42,9 @@ rei validate my-skill
 | `add <github-url>` | Install a skill or directory of skills from GitHub (alias: `a`, track with `-t`, prefix with `-p`) |
 | `list <skill-name>` | List all active skills (alias: `ls`, include deactivated with `-a/--all`) |
 | `config <subcommand>` | Inspect and manage the reishi config (`init`, `show`, `path`, `edit`) |
-| `sync [skill-name]` | Pull upstream for tracked skills, then distribute to configured targets (`--targets`, `--method`, `--dry-run`, `--status`, `--no-fetch`, `--force`, `--prefix-change`) |
+| `sync [skill-name]` | Pull upstream for tracked skills, then distribute skills and rules to configured targets (`--targets`, `--method`, `--dry-run`, `--status`, `--no-fetch`, `--force`, `--prefix-change`, `--rules-only`, `--skills-only`) |
 | `updates [skill-name]` | Check tracked skills for upstream changes (`--sync` to also pull) |
+| `rules <subcommand>` | Manage global markdown rules (`list`, `add`, `remove`, `sync`, `validate`) |
 
 ## Command Details
 
@@ -215,6 +216,51 @@ deno task cli updates --sync
 Reishi stores the latest seen upstream SHA in `[skills.<name>].remote_hash` and the time of last check in `last_check`. Disable polling for a single skill with `[skills.<name>].updates = false`.
 
 **Background notifications**: when `[updates].enabled = true` and `interval_hours` has elapsed since `[updates].last_background_check`, `rei list`, `rei sync`, `rei validate`, and `rei config show` fire a non-blocking background check and print a one-liner if any tracked skills have upstream updates: `✨ N skills have upstream updates — run rei updates for details`. The check is fire-and-forget — it never delays the main command.
+
+### rules
+
+Rules are global, always-on markdown files distributed to agent rule paths on sync. Unlike skills, rules are NOT tracked per-item — they are just files or directories in `rules.source` that get copied or symlinked to every entry in `[rules.targets]`. Both single `.md` files and directories of rules are supported.
+
+```bash
+# List rules present in rules.source
+deno task cli rules list
+
+# Add a rule from a local file, a directory, or a URL
+deno task cli rules add ./no-deletes.md
+deno task cli rules add ./security
+deno task cli rules add https://example.com/rule.md
+deno task cli rules add https://github.com/org/repo/tree/main/rules/security
+
+# Re-adding requires --force to overwrite an existing rule
+deno task cli rules add ./no-deletes.md --force
+
+# Remove a rule from rules.source AND every target
+deno task cli rules remove no-deletes
+
+# Sync rules from source to configured targets
+deno task cli rules sync
+deno task cli rules sync --targets=claude
+deno task cli rules sync --method=symlink --dry-run
+
+# Validate rules (reads every file, flags broken relative links)
+deno task cli rules validate
+```
+
+**Config**: rules live under the `[rules]` table:
+
+```toml
+[rules]
+source = "~/.config/reishi/rules"
+# sync_method = "symlink"     # optional override; inherits global sync_method
+
+[rules.targets]
+claude = "~/.claude/rules"
+# opencode = "~/.opencode/rules"
+```
+
+**Method resolution** (highest wins): CLI `--method` > `[rules].sync_method` > global `sync_method`.
+
+**Integration with `rei sync`**: `rei sync` (no arg) syncs both skills and rules. `rei sync <skill-name>` narrows to that skill and skips rules. `rei sync --rules-only` and `rei sync --skills-only` restrict to one content type. On full success the summary collapses to `✨ Synced N skills and M rules across K targets`.
 
 ## Testing
 

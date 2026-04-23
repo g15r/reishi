@@ -81,6 +81,12 @@ export async function listRules(): Promise<RuleEntry[]> {
   return out;
 }
 
+/** Return just the rule names — used for tab completion. */
+export async function getRuleNames(): Promise<string[]> {
+  const rules = await listRules();
+  return rules.map((r) => r.name);
+}
+
 // ============================================================================
 // Add
 // ============================================================================
@@ -486,3 +492,76 @@ export function printRulesSummary(results: RulesSyncResult[]): void {
   }
 }
 
+// ============================================================================
+// Validation
+// ============================================================================
+
+export interface RuleValidationIssue {
+  ruleName: string;
+  file: string;
+  message: string;
+}
+
+export interface RuleValidationResult {
+  valid: boolean;
+  issues: RuleValidationIssue[];
+  checked: number;
+}
+
+/**
+ * Check that every rule file reads and that its relative links resolve to
+ * existing files on disk. External http(s) links and anchors are ignored.
+ */
+export async function validateRules(): Promise<RuleValidationResult> {
+  const rules = await listRules();
+  const issues: RuleValidationIssue[] = [];
+  let checked = 0;
+
+  const checkFile = async (ruleName: string, file: string): Promise<void> => {
+    checked++;
+    let content: string;
+    try {
+      content = await Deno.readTextFile(file);
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      issues.push({ ruleName, file, message: `could not read: ${message}` });
+      return;
+    }
+    // Minimal link extraction: [text](target). Not a CommonMark parser — we
+    // just flag obvious breakage in relative links.
+    const linkRe = /\[[^\]]*\]\(([^)]+)\)/g;
+    for (const match of content.matchAll(linkRe)) {
+      const target = match[1].trim().split(/\s+/)[0]; // drop a trailing "title"
+      if (!target) continue;
+      if (/^(https?:|mailto:|#)/.test(target)) continue;
+      const resolved = join(dirname(file), target.split('#')[0]);
+      if (!(await exists(resolved))) {
+        issues.push({
+          ruleName,
+          file,
+          message: `broken relative link: ${target}`,
+        });
+      }
+    }
+  };
+
+  for (const rule of rules) {
+    if (rule.kind === 'file') {
+      await checkFile(rule.name, rule.path);
+    } else {
+      const walk = async (dir: string): Promise<void> => {
+        for await (const entry of Deno.readDir(dir)) {
+          if (entry.name.startsWith('.')) continue;
+          const abs = join(dir, entry.name);
+          if (entry.isDirectory) await walk(abs);
+          else if (entry.isFile && entry.name.endsWith('.md')) {
+            await checkFile(rule.name, abs);
+          }
+        }
+      };
+      await walk(rule.path);
+    }
+  }
+
+  return { valid: issues.length === 0, issues, checked };
+}

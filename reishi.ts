@@ -42,10 +42,12 @@ import {
 } from './sync.ts';
 import {
   addRule,
+  getRuleNames,
   listRules,
   printRulesSummary,
   removeRule,
   syncRules,
+  validateRules,
 } from './rules.ts';
 
 // ============================================================================
@@ -1194,7 +1196,8 @@ const cli = new Command()
   .meta('Templates', TEMPLATE_DIR)
   .meta('Source of Truth', configuredSource)
   .globalComplete('active-skill', () => getActiveSkillNames())
-  .globalComplete('deactivated-skill', () => getDeactivatedSkillNames());
+  .globalComplete('deactivated-skill', () => getDeactivatedSkillNames())
+  .globalComplete('rule-name', () => getRuleNames());
 
 // Init command
 cli
@@ -1376,7 +1379,7 @@ cli.command('config', configCommand);
 // Sync command
 cli
   .command('sync [skill-name:string:active-skill]')
-  .description('Sync skills: pull upstream for tracked, distribute to targets')
+  .description('Sync skills and rules: pull upstream for tracked, distribute to targets')
   .option('--targets <names:string>', 'Comma-separated target names to sync to')
   .option('--method <method:string>', 'Override sync method: copy or symlink')
   .option('--dry-run', 'Plan only — do not write')
@@ -1387,11 +1390,14 @@ cli
     '--prefix-change <mode:string>',
     'How to handle a changed prefix non-interactively: rename | parallel | abort',
   )
-  .example('Sync everything', 'rei sync')
+  .option('--rules-only', 'Sync only rules, skip skills', { conflicts: ['skills-only'] })
+  .option('--skills-only', 'Sync only skills, skip rules', { conflicts: ['rules-only'] })
+  .example('Sync everything (skills + rules)', 'rei sync')
   .example('Sync one skill', 'rei sync book-review')
   .example('Sync to a subset of targets', 'rei sync --targets=claude,agents')
   .example('Show staleness report', 'rei sync --status')
   .example('Skip upstream pull', 'rei sync --no-fetch')
+  .example('Sync only rules', 'rei sync --rules-only')
   .action(async (options, skillName) => {
     void maybeNotifyOfUpdates();
     if (options.status) {
@@ -1440,14 +1446,50 @@ cli
       force: options.force,
       prefixChange,
     };
-    const results = skillName
-      ? await syncSkill(skillName, syncOpts)
-      : await syncAll(syncOpts);
 
-    printSummary(results);
+    // A specific skill name always means "skill sync only" — rules don't have
+    // per-item targeting.
+    const doSkills = !options.rulesOnly;
+    const doRules = !options.skillsOnly && !skillName;
 
-    const failed = results.some((r) => r.action === 'failed');
-    Deno.exit(failed ? 1 : 0);
+    const skillResults = doSkills
+      ? (skillName
+        ? await syncSkill(skillName, syncOpts)
+        : await syncAll(syncOpts))
+      : [];
+    const ruleResults = doRules
+      ? await syncRules({
+        targets,
+        method,
+        dryRun: options.dryRun,
+      })
+      : [];
+
+    // Unified summary when both content types participated and everything
+    // succeeded; otherwise fall back to the per-type printers.
+    const anyFail = skillResults.some((r) => r.action === 'failed') ||
+      ruleResults.some((r) => r.action === 'failed');
+    if (
+      doSkills && doRules && !anyFail &&
+      skillResults.length > 0 && ruleResults.length > 0
+    ) {
+      const skillNames = new Set(skillResults.map((r) => r.skillName));
+      const ruleNames = new Set(ruleResults.map((r) => r.ruleName));
+      const targetNames = new Set([
+        ...skillResults.map((r) => r.target),
+        ...ruleResults.map((r) => r.target),
+      ]);
+      console.log(
+        `${green('✨ Synced')} ${skillNames.size} skill${skillNames.size === 1 ? '' : 's'} and ${ruleNames.size} rule${
+          ruleNames.size === 1 ? '' : 's'
+        } across ${targetNames.size} target${targetNames.size === 1 ? '' : 's'}`,
+      );
+    } else {
+      if (skillResults.length > 0) printSummary(skillResults);
+      if (ruleResults.length > 0) printRulesSummary(ruleResults);
+    }
+
+    Deno.exit(anyFail ? 1 : 0);
   });
 
 // Updates command — check tracked skills for upstream changes.
@@ -1527,7 +1569,7 @@ const rulesCommand = new Command()
       Deno.exit(1);
     }
   })
-  .command('remove <name:string>')
+  .command('remove <name:string:rule-name>')
   .alias('rm')
   .description('Remove a rule from source and all targets')
   .example('Remove a rule', 'rei rules remove no-deletes')
@@ -1571,6 +1613,31 @@ const rulesCommand = new Command()
     printRulesSummary(results);
     const failed = results.some((r) => r.action === 'failed');
     Deno.exit(failed ? 1 : 0);
+  })
+  .command('validate')
+  .description('Check all rules for broken relative links and read errors')
+  .example('Validate rules', 'rei rules validate')
+  .action(async () => {
+    const result = await validateRules();
+    if (result.valid) {
+      console.log(
+        `${green('✨ All rules valid')} ${
+          dim(italic(`(${result.checked} file${result.checked === 1 ? '' : 's'} checked)`))
+        }`,
+      );
+      Deno.exit(0);
+    }
+    for (const issue of result.issues) {
+      console.error(
+        `${red('❌')} ${magenta(issue.ruleName)} ${dim(italic(issue.file))}: ${issue.message}`,
+      );
+    }
+    console.error(
+      `\n${red('✗')} ${result.issues.length} issue${result.issues.length === 1 ? '' : 's'} in ${result.checked} file${
+        result.checked === 1 ? '' : 's'
+      }`,
+    );
+    Deno.exit(1);
   });
 
 cli.command('rules', rulesCommand);

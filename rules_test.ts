@@ -8,7 +8,14 @@ import { join } from '@std/path';
 import { exists } from '@std/fs';
 import { parse as parseTOML, stringify as stringifyTOML } from '@std/toml';
 import { resetPathCache } from './paths.ts';
-import { addRule, listRules, removeRule, syncRules } from './rules.ts';
+import {
+  addRule,
+  getRuleNames,
+  listRules,
+  removeRule,
+  syncRules,
+  validateRules,
+} from './rules.ts';
 import {
   fakeFetchGithub,
   fixturesPath,
@@ -394,6 +401,78 @@ Deno.test('syncRules: missing target parent warns and skips', async () => {
       const results = await syncRules();
       assert(results.every((r) => r.action === 'skipped'));
       assert(results[0].reason?.includes('parent dir missing'));
+    });
+  } finally {
+    await env.cleanup();
+  }
+});
+
+Deno.test('validateRules: clean fixture passes', async () => {
+  const env = await setupIsolatedEnv();
+  try {
+    await withEnv(env.env, async () => {
+      const rulesDir = join(env.home, '.config', 'reishi', 'rules');
+      await Deno.mkdir(rulesDir, { recursive: true });
+      await Deno.writeTextFile(
+        join(rulesDir, 'rule.md'),
+        '# OK\n\nExternal: [link](https://example.com)\n',
+      );
+
+      const result = await validateRules();
+      assertEquals(result.valid, true);
+      assertEquals(result.issues.length, 0);
+      assertEquals(result.checked, 1);
+    });
+  } finally {
+    await env.cleanup();
+  }
+});
+
+Deno.test('validateRules: passes the seeded fixture directory with a cross-file link', async () => {
+  const env = await setupIsolatedEnv();
+  try {
+    await withEnv(env.env, async () => {
+      // Copy the repo fixture into the isolated rules source — security/policies.md
+      // links to ../no-deletes.md which resolves inside rules.source.
+      await addRule(fixturesPath('rules', 'no-deletes.md'));
+      await addRule(fixturesPath('rules', 'security'));
+      const result = await validateRules();
+      assertEquals(result.valid, true, JSON.stringify(result.issues));
+    });
+  } finally {
+    await env.cleanup();
+  }
+});
+
+Deno.test('validateRules: broken relative link is reported', async () => {
+  const env = await setupIsolatedEnv();
+  try {
+    await withEnv(env.env, async () => {
+      const rulesDir = join(env.home, '.config', 'reishi', 'rules');
+      await Deno.mkdir(rulesDir, { recursive: true });
+      await Deno.writeTextFile(
+        join(rulesDir, 'rule.md'),
+        '# Broken\n\n[missing](./nope.md)\n',
+      );
+
+      const result = await validateRules();
+      assertEquals(result.valid, false);
+      assertEquals(result.issues.length, 1);
+      assert(result.issues[0].message.includes('broken relative link'));
+    });
+  } finally {
+    await env.cleanup();
+  }
+});
+
+Deno.test('getRuleNames: returns basename list for tab completion', async () => {
+  const env = await setupIsolatedEnv();
+  try {
+    await withEnv(env.env, async () => {
+      const rulesDir = join(env.home, '.config', 'reishi', 'rules');
+      await seedRulesSource(rulesDir);
+      const names = await getRuleNames();
+      assertEquals(names.sort(), ['no-deletes', 'security']);
     });
   } finally {
     await env.cleanup();

@@ -35,7 +35,7 @@
     "test:unit": "deno test --allow-read --allow-write --allow-env config_test.ts paths_test.ts",
     "test:add": "deno test --allow-read --allow-write --allow-run=cp,tar --allow-env=HOME,TMPDIR,EDITOR,REISHI_CONFIG add_test.ts",
     "test:sync": "deno test --allow-read --allow-write --allow-env=HOME,TMPDIR,EDITOR,REISHI_CONFIG sync_test.ts",
-    "test:sync-integration": "deno test --allow-read --allow-write --allow-run=cp,tar --allow-env=HOME,TMPDIR,EDITOR,REISHI_CONFIG sync_integration_test.ts",
+    "test:sync-integration": "deno test --allow-read --allow-write --allow-run=cp,tar,deno --allow-net --allow-env=HOME,TMPDIR,EDITOR,REISHI_CONFIG,PATH,USER,XDG_CACHE_HOME,DENO_DIR sync_integration_test.ts",
     "test:sync-fetch": "deno test --allow-read --allow-write --allow-run=cp,tar --allow-env=HOME,TMPDIR,EDITOR,REISHI_CONFIG sync_fetch_test.ts",
     "test:sync-prefix": "deno test --allow-read --allow-write --allow-run=cp,tar --allow-env=HOME,TMPDIR,EDITOR,REISHI_CONFIG sync_prefix_test.ts",
     "test:updates": "deno test --allow-read --allow-write --allow-env=HOME,TMPDIR,EDITOR,REISHI_CONFIG updates_test.ts",
