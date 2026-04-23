@@ -175,7 +175,7 @@ Build a fixture project that the full test suite can use across Phases 2-4. This
 - [x] Ensure the fixture supports: tracked adds, prefixed adds, multi-skill repos, prefix changes, and sync operations
 - [x] Integration tests: `rei add -tp <fixture-url>` produces correctly named and tracked skills in the temp config
 
-## Phase 3: Central Source of Truth and Target Sync 🌀
+## Phase 3: Central Source of Truth and Target Sync ✅
 
 ### Source of truth migration
 
@@ -203,12 +203,12 @@ Core engine for distributing skills from source to named targets.
 
 ### Wire sync into existing commands
 
-- [ ] `add` command syncs to targets after installing to source (when targets are configured)
-- [ ] `activate` / `deactivate` syncs state change to targets
-- [ ] `init` places new skill in source and syncs
-- [ ] Tests: end-to-end add-then-verify-targets, activate/deactivate reflected in targets
+- [x] `add` command syncs to targets after installing to source (skipped when `--path` is outside source)
+- [x] `activate` / `deactivate` syncs state change to targets (`deactivate` removes from every target)
+- [x] `init` places new skill in source and syncs (only when `--path` resolves to source)
+- [x] Tests: end-to-end add-then-verify-targets, custom `--path` does not propagate, multi-skill add syncs every skill, deactivate/activate round-trip (`sync_integration_test.ts`)
 
-## Phase 4: Sync Updates and Prefix Changes
+## Phase 4: Sync Updates and Prefix Changes 🌀
 
 ### `rei sync` for tracked skills
 

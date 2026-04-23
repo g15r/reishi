@@ -42,6 +42,7 @@ rei validate my-skill
 | `add <github-url>` | Install a skill or directory of skills from GitHub (alias: `a`, track with `-t`, prefix with `-p`) |
 | `list <skill-name>` | List all active skills (alias: `ls`, include deactivated with `-a/--all`) |
 | `config <subcommand>` | Inspect and manage the reishi config (`init`, `show`, `path`, `edit`) |
+| `sync [skill-name]` | Distribute skills from the source of truth to configured targets (`--targets`, `--method`, `--dry-run`, `--status`) |
 
 ## Command Details
 
@@ -153,6 +154,36 @@ deno task cli activate old-skill
 - Source of truth (active): `paths.source` from the reishi config — default `~/.config/reishi/skills/`
 - Deactivated: `<paths.source>/_deactivated/`
 - Targets: configured under `[paths.targets]`, synced from the source of truth on every change
+
+### sync
+
+Distribute skills from the source of truth to configured targets by copy or symlink:
+
+```bash
+# Sync everything (all active skills → every configured target)
+deno task cli sync
+
+# Sync a single skill
+deno task cli sync book-review
+
+# Limit to specific targets
+deno task cli sync --targets=claude,agents
+
+# Override sync method (config default is "copy")
+deno task cli sync --method=symlink
+
+# Plan only — show what would happen without writing
+deno task cli sync --dry-run
+
+# Staleness report (present / fresh / stale / missing / symlink, per skill × target)
+deno task cli sync --status
+```
+
+**Resolution order for sync method** (highest wins): CLI `--method` > per-skill `[skills.<name>].sync_method` > global `sync_method` in config.
+
+**Per-skill target filter**: `[skills.<name>].targets = ["claude"]` restricts a skill to those named targets from `[paths.targets]`.
+
+**Auto-sync**: `add`, `activate`, `deactivate`, and `init` (when scaffolding inside the source dir) trigger sync automatically. If no targets are configured or the target parent dir is missing, the sync is a silent no-op. `deactivate` removes the skill from every target.
 
 ## Testing
 

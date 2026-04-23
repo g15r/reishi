@@ -36,6 +36,7 @@ import {
   syncSkill,
   syncStatus,
   type SyncOptions,
+  unsyncSkill,
 } from './sync.ts';
 
 // ============================================================================
@@ -150,6 +151,39 @@ async function loadTemplate(name: string): Promise<string> {
 
 function interpolate(template: string, vars: Record<string, string>): string {
   return template.replace(/\{\{(\w+)\}\}/g, (_, key) => vars[key] || '');
+}
+
+/**
+ * Run sync after a mutating command and print a one-line follow-up. No
+ * output when there are no targets to act on — keeps the common "no
+ * targets configured" case silent instead of spammy.
+ */
+async function syncAndReport(
+  skillName: string,
+  mode: 'sync' | 'unsync',
+): Promise<void> {
+  try {
+    const results = mode === 'sync'
+      ? await syncSkill(skillName)
+      : await unsyncSkill(skillName);
+    if (results.length === 0) return;
+    const touched = results.filter((r) => r.action !== 'skipped' && r.action !== 'failed');
+    if (touched.length === 0) return;
+    const targetNames = [...new Set(touched.map((r) => r.target))].join(', ');
+    const verb = mode === 'sync' ? 'Synced to' : 'Removed from';
+    console.log(`${green('✨')} ${verb} ${magenta(targetNames)}`);
+    const failed = results.filter((r) => r.action === 'failed');
+    for (const f of failed) {
+      console.error(
+        `  ${red('❌ sync failed')} ${magenta(f.skillName)} → ${f.target} ${dim(italic(`(${f.reason ?? ''})`))}`,
+      );
+    }
+  } catch (error) {
+    // Sync is a side-effect — surface the error but don't flip the caller's
+    // success back to failure. The primary operation already succeeded.
+    const message = error instanceof Error ? error.message : String(error);
+    console.error(`${red('⚠ sync error:')} ${message}`);
+  }
 }
 
 // Returns an error message string if invalid, null if valid.
@@ -598,6 +632,7 @@ async function activateSkill(skillName: string): Promise<boolean> {
     console.log(`${green('✅ Activated')} ${magenta(skillName)}`);
     console.log(`   ${dim(italic('Moved from:'))} ${sourcePath}`);
     console.log(`   ${dim(italic('Moved to:'))}   ${destPath}`);
+    await syncAndReport(skillName, 'sync');
     return true;
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error);
@@ -647,6 +682,7 @@ async function deactivateSkill(skillName: string): Promise<boolean> {
     console.log(`${green('✅ Deactivated')} ${magenta(skillName)}`);
     console.log(`   ${dim(italic('Moved from:'))} ${sourcePath}`);
     console.log(`   ${dim(italic('Moved to:'))}   ${destPath}`);
+    await syncAndReport(skillName, 'unsync');
     return true;
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error);
@@ -920,6 +956,16 @@ async function addSkill(
       console.log(`   ${dim(italic('config:'))} ${magenta(path)}`);
     };
 
+    // Only trigger target sync when the install landed in the configured
+    // source of truth. Installs to an arbitrary --path are scaffolding and
+    // shouldn't propagate to downstream targets.
+    const configuredSourceDir = await getSourceDir();
+    const destIsSource = resolve(destPath) === resolve(configuredSourceDir);
+    const maybeSync = async (installedName: string): Promise<void> => {
+      if (!destIsSource) return;
+      await syncAndReport(installedName, 'sync');
+    };
+
     // Single-skill: SKILL.md exists directly at targetDir
     if (await exists(join(targetDir, 'SKILL.md'))) {
       const baseName = subpath.split('/').filter(Boolean).pop() ?? repo;
@@ -945,6 +991,7 @@ async function addSkill(
 
       if (outcome.ok) {
         await maybeTrack(installedName, subpath);
+        await maybeSync(installedName);
         console.log(`\n${dim(italic('Next steps:'))}`);
         console.log('1. Review SKILL.md to ensure it fits your setup');
         console.log(
@@ -993,6 +1040,7 @@ async function addSkill(
 
       if (outcome.ok) {
         await maybeTrack(installedName, entrySubpath);
+        await maybeSync(installedName);
         successCount++;
       } else if (outcome.existed && options.track) {
         const existingConfig = await loadConfig();
@@ -1156,10 +1204,15 @@ cli
     'rei init my-skill --fork https://github.com/user/repo',
   )
   .action(async (options, skillName) => {
-    const basePath = options.path ?? await getSourceDir();
+    const sourceDir = await getSourceDir();
+    const basePath = options.path ?? sourceDir;
     const success = options.fork
       ? await forkSkill(skillName, basePath, options.fork)
       : await initSkill(skillName, basePath);
+    // Only propagate to targets when scaffolding inside the source of truth.
+    if (success && resolve(basePath) === resolve(sourceDir)) {
+      await syncAndReport(skillName, 'sync');
+    }
     Deno.exit(success ? 0 : 1);
   });
 
