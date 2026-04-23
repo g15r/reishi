@@ -39,7 +39,7 @@ rei validate my-skill
 | `refresh-docs` | Fetch latest Anthropic skill documentation |
 | `activate <skill-name>` | Move skill from deactivated to active (alias: `on`) |
 | `deactivate <skill-name>` | Move skill from active to deactivated (alias: `off`) |
-| `add <github-url>` | Install a skill or directory of skills from GitHub (alias: `a`, track with `-t`) |
+| `add <github-url>` | Install a skill or directory of skills from GitHub (alias: `a`, track with `-t`, prefix with `-p`) |
 | `list <skill-name>` | List all active skills (alias: `ls`, include deactivated with `-a/--all`) |
 | `config <subcommand>` | Inspect and manage the reishi config (`init`, `show`, `path`, `edit`) |
 
@@ -104,6 +104,7 @@ deno task cli add https://github.com/user/repo/tree/main/skills
 **Flags**:
 
 - `-t, --track`: Record the skill's origin (`source_url`, `ref`, `subpath`, `synced_at`) in `~/.config/reishi/config.toml` under `[skills.<name>]` so `rei sync` can refresh it later. Re-adding a tracked skill updates `synced_at` in place.
+- `-p, --prefix [value]`: Prefix installed skill names. `-p` alone infers the prefix from the GitHub URL's user/org (e.g. `readwiseio` → `readwiseio_book-review`); `--prefix=foo` uses a literal value. Separator comes from `prefix_separator` in config (default `_`). Respects `default_prefix = "infer"` in config as an opt-in default when the flag is absent.
 
 ### refresh-docs
 

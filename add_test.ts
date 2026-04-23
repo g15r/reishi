@@ -7,7 +7,7 @@
  * Run: deno task test:add
  */
 
-import { assert, assertEquals } from '@std/assert';
+import { assert, assertEquals, assertStringIncludes } from '@std/assert';
 import { parse as parseTOML } from '@std/toml';
 import { join } from '@std/path';
 import { exists } from '@std/fs';
@@ -175,5 +175,115 @@ Deno.test('track: re-adding a tracked skill updates synced_at', async () => {
     );
     // Still just one entry, not a duplicate.
     assertEquals(Object.keys(cfg2.skills!).length, 1);
+  });
+});
+
+// ---------- Objective 3: --prefix flag ----------
+
+Deno.test('prefix: inferred from URL org when empty-string prefix passed', async () => {
+  await withFixture('multi-skill-repo', {}, async ({ env, fetcher }) => {
+    const url = 'https://github.com/readwiseio/multi-skill-repo/tree/main/skills';
+    const ok = await addSkill(url, env.sourceDir, { fetcher, prefix: '' });
+    assertEquals(ok, true);
+    assert(await exists(join(env.sourceDir, 'readwiseio_book-review', 'SKILL.md')));
+    assert(await exists(join(env.sourceDir, 'readwiseio_readwise-cli', 'SKILL.md')));
+  });
+});
+
+Deno.test('prefix: explicit value overrides inference', async () => {
+  await withFixture('multi-skill-repo', {}, async ({ env, fetcher }) => {
+    const url = 'https://github.com/readwiseio/multi-skill-repo/tree/main/skills';
+    const ok = await addSkill(url, env.sourceDir, { fetcher, prefix: 'custom' });
+    assertEquals(ok, true);
+    assert(await exists(join(env.sourceDir, 'custom_book-review', 'SKILL.md')));
+    assert(await exists(join(env.sourceDir, 'custom_readwise-cli', 'SKILL.md')));
+  });
+});
+
+Deno.test('prefix: custom prefix_separator from config is respected', async () => {
+  await withFixture(
+    'multi-skill-repo',
+    { prefix_separator: '-' },
+    async ({ env, fetcher }) => {
+      const url = 'https://github.com/readwiseio/multi-skill-repo/tree/main/skills';
+      const ok = await addSkill(url, env.sourceDir, { fetcher, prefix: 'org' });
+      assertEquals(ok, true);
+      assert(await exists(join(env.sourceDir, 'org-book-review', 'SKILL.md')));
+      assert(await exists(join(env.sourceDir, 'org-readwise-cli', 'SKILL.md')));
+    },
+  );
+});
+
+Deno.test('prefix: default_prefix = "infer" applies prefix even without -p flag', async () => {
+  await withFixture(
+    'multi-skill-repo',
+    { default_prefix: 'infer' },
+    async ({ env, fetcher }) => {
+      const url = 'https://github.com/readwiseio/multi-skill-repo/tree/main/skills';
+      // No `prefix` option — config's default_prefix=infer should kick in.
+      const ok = await addSkill(url, env.sourceDir, { fetcher });
+      assertEquals(ok, true);
+      assert(await exists(join(env.sourceDir, 'readwiseio_book-review', 'SKILL.md')));
+    },
+  );
+});
+
+Deno.test('prefix: default_prefix = "none" (default) applies no prefix', async () => {
+  await withFixture('multi-skill-repo', {}, async ({ env, fetcher }) => {
+    const url = 'https://github.com/readwiseio/multi-skill-repo/tree/main/skills';
+    const ok = await addSkill(url, env.sourceDir, { fetcher });
+    assertEquals(ok, true);
+    assert(await exists(join(env.sourceDir, 'book-review', 'SKILL.md')));
+    assert(!(await exists(join(env.sourceDir, 'readwiseio_book-review'))));
+  });
+});
+
+Deno.test('prefix + track: prefix recorded in [skills.<name>] entry', async () => {
+  await withFixture('multi-skill-repo', {}, async ({ env, fetcher }) => {
+    const url = 'https://github.com/readwiseio/multi-skill-repo/tree/main/skills';
+    const ok = await addSkill(url, env.sourceDir, {
+      fetcher,
+      track: true,
+      prefix: '',
+    });
+    assertEquals(ok, true);
+
+    const cfg = await readConfig(env.configPath);
+    const br = cfg.skills!['readwiseio_book-review'];
+    const rc = cfg.skills!['readwiseio_readwise-cli'];
+    assert(br && rc, 'expected both prefixed skills tracked');
+    assertEquals(br.prefix, 'readwiseio');
+    assertEquals(rc.prefix, 'readwiseio');
+  });
+});
+
+Deno.test('prefix: prefixed name with underscore separator installs successfully', async () => {
+  await withFixture('single-skill-repo', {}, async ({ env, fetcher }) => {
+    const url = 'https://github.com/acme/single-skill-repo/tree/main';
+    const ok = await addSkill(url, env.sourceDir, { fetcher, prefix: '' });
+    assertEquals(ok, true);
+    assert(await exists(join(env.sourceDir, 'acme_single-skill-repo', 'SKILL.md')));
+  });
+});
+
+Deno.test('track: TOML round-trips hyphenated skill names in [skills.<name>]', async () => {
+  await withFixture('multi-skill-repo', {}, async ({ env, fetcher }) => {
+    const url = 'https://github.com/readwiseio/multi-skill-repo/tree/main/skills';
+    const ok = await addSkill(url, env.sourceDir, {
+      fetcher,
+      track: true,
+      prefix: '',
+    });
+    assertEquals(ok, true);
+
+    const raw = await Deno.readTextFile(env.configPath);
+    // Hyphen + underscore in the key should serialize safely (quoted or dotted).
+    assertStringIncludes(raw, 'readwiseio_book-review');
+    assertStringIncludes(raw, 'readwiseio_readwise-cli');
+
+    // Round-trip still yields valid entries.
+    const cfg = await readConfig(env.configPath);
+    assert(cfg.skills?.['readwiseio_book-review']);
+    assert(cfg.skills?.['readwiseio_readwise-cli']);
   });
 });

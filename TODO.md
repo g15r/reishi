@@ -118,7 +118,7 @@ index_filename = "AGENTS.md"
 
 Per-skill overrides are stored in the `[skills.<name>]` table and documented in Phase 2.
 
-## Phase 2: Tracked Skills — `--track` and `--prefix` Flags 🌀
+## Phase 2: Tracked Skills — `--track` and `--prefix` Flags ✅
 
 ### `--track` (`-t`) flag
 
@@ -135,14 +135,14 @@ When `rei add -t <url>` is used, reishi records metadata about the skill's origi
 
 Prefixes the GitHub org/user (or a custom value) to each skill name on install. `rei add -tp` on `readwiseio/readwise-skills` produces `readwiseio_book-review`, etc.
 
-- [ ] Add `-p / --prefix [value:string]` optional-value flag to the `add` command
-- [ ] When `-p` is used without a value, infer prefix from the GitHub URL's user/org segment
-- [ ] When `-p` is used with a value (e.g. `--prefix='readwise'`), use that value
-- [ ] Update skill name validation to allow the `prefix_separator` character (default `_`) when a prefix is present — the prefix portion and skill portion each independently pass current validation rules
-- [ ] Rename skill directories during install to `{prefix}{separator}{original_name}`
-- [ ] If `--track` is also active, record the `prefix` in the skill's config entry
-- [ ] Respect `default_prefix` and `prefix_separator` from global config
-- [ ] Tests: prefix inferred from URL org, prefix from explicit value, separator config respected, prefixed names pass validation, unprefixed names still reject `_`
+- [x] Add `-p / --prefix [value:string]` optional-value flag to the `add` command
+- [x] When `-p` is used without a value, infer prefix from the GitHub URL's user/org segment
+- [x] When `-p` is used with a value (e.g. `--prefix='readwise'`), use that value
+- [x] Update skill name validation to allow the `prefix_separator` character (default `_`) when a prefix is present — the prefix portion and skill portion each independently pass current validation rules
+- [x] Rename skill directories during install to `{prefix}{separator}{original_name}`
+- [x] If `--track` is also active, record the `prefix` in the skill's config entry
+- [x] Respect `default_prefix` and `prefix_separator` from global config
+- [x] Tests: prefix inferred from URL org, prefix from explicit value, separator config respected, prefixed names pass validation, unprefixed names still reject `_`
 
 ### Per-skill config schema
 
@@ -169,13 +169,13 @@ synced_at = "2026-04-23T12:00:00Z"
 
 Build a fixture project that the full test suite can use across Phases 2-4. This is foundational scaffolding for test-driven development of all tracking, syncing, and update features.
 
-- [ ] Create a `test-fixtures/` directory with mock skill repos (single-skill and multi-skill layouts)
-- [ ] Create a mock GitHub tarball or local directory structure that `add` can consume without network calls
-- [ ] Write a test helper that sets up an isolated config dir, source dir, and target dirs in `$TMPDIR`
-- [ ] Ensure the fixture supports: tracked adds, prefixed adds, multi-skill repos, prefix changes, and sync operations
-- [ ] Integration tests: `rei add -tp <fixture-url>` produces correctly named and tracked skills in the temp config
+- [x] Create a `test-fixtures/` directory with mock skill repos (single-skill and multi-skill layouts)
+- [x] Create a mock GitHub tarball or local directory structure that `add` can consume without network calls
+- [x] Write a test helper that sets up an isolated config dir, source dir, and target dirs in `$TMPDIR`
+- [x] Ensure the fixture supports: tracked adds, prefixed adds, multi-skill repos, prefix changes, and sync operations
+- [x] Integration tests: `rei add -tp <fixture-url>` produces correctly named and tracked skills in the temp config
 
-## Phase 3: Central Source of Truth and Target Sync
+## Phase 3: Central Source of Truth and Target Sync 🌀
 
 ### Source of truth migration
 

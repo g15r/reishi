@@ -146,7 +146,27 @@ function interpolate(template: string, vars: Record<string, string>): string {
 }
 
 // Returns an error message string if invalid, null if valid.
-function validateSkillName(skillName: string): string | null {
+// When `separator` is provided AND present in the name, each side of the first
+// occurrence is validated independently with the unprefixed rules. Names
+// without the separator always validate under the stricter core rules — so
+// unprefixed names continue to reject `_`.
+function validateSkillName(skillName: string, separator?: string): string | null {
+  if (separator && separator.length > 0 && skillName.includes(separator)) {
+    const sepIdx = skillName.indexOf(separator);
+    const prefix = skillName.slice(0, sepIdx);
+    const rest = skillName.slice(sepIdx + separator.length);
+    if (prefix.length === 0 || rest.length === 0) {
+      return `Invalid skill name '${skillName}'\n   Prefix and skill name cannot be empty around '${separator}'`;
+    }
+    const prefixError = validateSkillName(prefix);
+    if (prefixError) return prefixError;
+    const restError = validateSkillName(rest);
+    if (restError) return restError;
+    if (skillName.length > 64) {
+      return `Skill name too long (${skillName.length} characters)\n   Maximum length is 64 characters`;
+    }
+    return null;
+  }
   if (!/^[a-z0-9-]+$/.test(skillName)) {
     return `Invalid skill name '${skillName}'\n   Skill names must be lowercase letters, digits, and hyphens only`;
   }
@@ -722,6 +742,13 @@ export type TarballFetcher = (url: string) => Promise<Response>;
 export interface AddSkillOptions {
   /** When true, write a `[skills.<name>]` entry to the config after install. */
   track?: boolean;
+  /**
+   * Prefix behavior:
+   *   - undefined: use the config's `default_prefix` setting
+   *   - '' (empty string): infer from the URL's user/org
+   *   - any other string: literal value
+   */
+  prefix?: string;
   /** Injected fetcher for tests. Defaults to global `fetch`. */
   fetcher?: TarballFetcher;
 }
@@ -770,6 +797,16 @@ async function addSkill(
   const [, user, repo, ref, subpathRaw] = match;
   const subpath = subpathRaw ? subpathRaw.replace(/^\//, '') : '';
   const sourceUrl = `https://github.com/${user}/${repo}`;
+
+  // Resolve prefix: explicit CLI option > config's default_prefix. An
+  // empty-string prefix ('') means "infer from user/org".
+  const config = await loadConfig();
+  const separator = config.prefix_separator;
+  let prefix: string | undefined = options.prefix;
+  if (prefix === undefined && config.default_prefix === 'infer') {
+    prefix = '';
+  }
+  if (prefix === '') prefix = user;
 
   console.log(`Adding from ${magenta(`${user}/${repo}`)} @ ${magenta(ref)}...`);
 
@@ -832,6 +869,18 @@ async function addSkill(
       return false;
     }
 
+    const applyPrefix = (name: string) => prefix ? `${prefix}${separator}${name}` : name;
+
+    // Validate name (post-prefix) using the separator-aware validator.
+    const checkName = (installedName: string): boolean => {
+      const nameError = validateSkillName(installedName, prefix ? separator : undefined);
+      if (nameError) {
+        console.error(`${red('❌ Error:')} ${nameError}`);
+        return false;
+      }
+      return true;
+    };
+
     const maybeTrack = async (
       installedName: string,
       entrySubpath: string,
@@ -843,6 +892,7 @@ async function addSkill(
         ref,
         synced_at: new Date().toISOString(),
       };
+      if (prefix) entry.prefix = prefix;
       const path = await trackSkill(installedName, entry);
       console.log(
         `${green('📌 Tracked')} ${magenta(installedName)} ${dim(italic(`(${sourceUrl})`))}`,
@@ -853,11 +903,14 @@ async function addSkill(
 
     // Single-skill: SKILL.md exists directly at targetDir
     if (await exists(join(targetDir, 'SKILL.md'))) {
-      const skillName = subpath.split('/').filter(Boolean).pop() ?? repo;
+      const baseName = subpath.split('/').filter(Boolean).pop() ?? repo;
+      const installedName = applyPrefix(baseName);
+      if (!checkName(installedName)) return false;
+
       const outcome = await installSkill(
         targetDir,
         destPath,
-        skillName,
+        installedName,
         `${user}/${repo}`,
       );
 
@@ -865,18 +918,18 @@ async function addSkill(
       // synced_at and succeed. Full re-sync is Phase 4.
       if (!outcome.ok && outcome.existed && options.track) {
         const existingConfig = await loadConfig();
-        if (existingConfig.skills?.[skillName]) {
-          await maybeTrack(skillName, subpath);
+        if (existingConfig.skills?.[installedName]) {
+          await maybeTrack(installedName, subpath);
           return true;
         }
       }
 
       if (outcome.ok) {
-        await maybeTrack(skillName, subpath);
+        await maybeTrack(installedName, subpath);
         console.log(`\n${dim(italic('Next steps:'))}`);
         console.log('1. Review SKILL.md to ensure it fits your setup');
         console.log(
-          `2. Validate: ${dim(italic('rei validate'))} ${magenta(join(destPath, skillName))}`,
+          `2. Validate: ${dim(italic('rei validate'))} ${magenta(join(destPath, installedName))}`,
         );
       }
       return outcome.ok;
@@ -908,21 +961,24 @@ async function addSkill(
 
     let successCount = 0;
     for (const skillName of skills) {
+      const installedName = applyPrefix(skillName);
+      if (!checkName(installedName)) continue;
+
       const outcome = await installSkill(
         join(targetDir, skillName),
         destPath,
-        skillName,
+        installedName,
         `${user}/${repo}`,
       );
       const entrySubpath = subpath ? `${subpath}/${skillName}` : skillName;
 
       if (outcome.ok) {
-        await maybeTrack(skillName, entrySubpath);
+        await maybeTrack(installedName, entrySubpath);
         successCount++;
       } else if (outcome.existed && options.track) {
         const existingConfig = await loadConfig();
-        if (existingConfig.skills?.[skillName]) {
-          await maybeTrack(skillName, entrySubpath);
+        if (existingConfig.skills?.[installedName]) {
+          await maybeTrack(installedName, entrySubpath);
           successCount++;
         }
       }
@@ -1162,6 +1218,10 @@ cli
     'Record skill origin in the config for later syncing',
     { default: false },
   )
+  .option(
+    '-p, --prefix [value:string]',
+    'Prefix skill names with an org/user (no value = infer from URL)',
+  )
   .example(
     'Add a single skill',
     'rei add https://github.com/user/repo/tree/main/skills/my-skill',
@@ -1171,12 +1231,19 @@ cli
     'rei add https://github.com/user/repo/tree/main/skills',
   )
   .example(
-    'Track a skill for later sync',
-    'rei add -t https://github.com/user/repo/tree/main/skills/my-skill',
+    'Track and prefix with inferred org',
+    'rei add -tp https://github.com/readwiseio/readwise-skills/tree/main/skills',
   )
   .action(async (options, githubUrl) => {
+    // Cliffy's optional-value flag: `true` = flag passed with no value, string = value,
+    // undefined = flag absent. Normalize to undefined | '' | string for addSkill.
+    let prefix: string | undefined;
+    if (options.prefix === true) prefix = '';
+    else if (typeof options.prefix === 'string') prefix = options.prefix;
+
     const success = await addSkill(githubUrl, options.path, {
       track: options.track,
+      prefix,
     });
     Deno.exit(success ? 0 : 1);
   });
