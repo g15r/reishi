@@ -25,6 +25,8 @@ export interface PathsConfig {
 export interface UpdatesConfig {
   enabled: boolean;
   interval_hours: number;
+  /** ISO timestamp of the last fired background update check. */
+  last_background_check?: string;
 }
 
 export interface RulesConfig {

@@ -30,6 +30,8 @@ import {
 } from './config.ts';
 import { getDeactivatedDir, getSourceDir } from './paths.ts';
 import {
+  checkForUpdates,
+  maybeNotifyOfUpdates,
   printStatus,
   printSummary,
   syncAll,
@@ -164,7 +166,9 @@ async function syncAndReport(
 ): Promise<void> {
   try {
     const results = mode === 'sync'
-      ? await syncSkill(skillName)
+      // Auto-sync triggers (add/activate/init) should never pull upstream —
+      // that's reserved for the explicit `rei sync` command.
+      ? await syncSkill(skillName, { fetchUpstream: false })
       : await unsyncSkill(skillName);
     if (results.length === 0) return;
     const touched = results.filter((r) => r.action !== 'skipped' && r.action !== 'failed');
@@ -1114,6 +1118,7 @@ async function configInit(): Promise<boolean> {
 
 async function configShow(): Promise<boolean> {
   try {
+    void maybeNotifyOfUpdates();
     const config = await loadConfig();
     const rendered = stringifyTOML(config as unknown as Record<string, unknown>);
     console.log(rendered.trimEnd());
@@ -1223,6 +1228,7 @@ cli
   .description('Validate skill structure and frontmatter')
   .example('Validate a skill', 'rei validate agents/skills/my-skill')
   .action(async (_options, skillPath) => {
+    void maybeNotifyOfUpdates();
     const result = await validateSkill(skillPath);
     console.log(result.message);
     Deno.exit(result.valid ? 0 : 1);
@@ -1269,6 +1275,9 @@ cli
   .example('List active skills', 'rei list')
   .example('List all skills', 'rei list --all')
   .action(async (options) => {
+    // Race-tolerant background nudge — don't await; if it loses the race the
+    // notification simply won't print this run.
+    void maybeNotifyOfUpdates();
     const success = await listSkills(options.all);
     Deno.exit(success ? 0 : 1);
   });
@@ -1360,16 +1369,24 @@ cli.command('config', configCommand);
 // Sync command
 cli
   .command('sync [skill-name:string:active-skill]')
-  .description('Sync skills from the source of truth to configured targets')
+  .description('Sync skills: pull upstream for tracked, distribute to targets')
   .option('--targets <names:string>', 'Comma-separated target names to sync to')
   .option('--method <method:string>', 'Override sync method: copy or symlink')
   .option('--dry-run', 'Plan only — do not write')
   .option('--status', 'Show sync state instead of syncing')
+  .option('--no-fetch', 'Skip the upstream fetch step (target sync only)')
+  .option('--force', 'Overwrite local modifications without prompting')
+  .option(
+    '--prefix-change <mode:string>',
+    'How to handle a changed prefix non-interactively: rename | parallel | abort',
+  )
   .example('Sync everything', 'rei sync')
   .example('Sync one skill', 'rei sync book-review')
   .example('Sync to a subset of targets', 'rei sync --targets=claude,agents')
   .example('Show staleness report', 'rei sync --status')
+  .example('Skip upstream pull', 'rei sync --no-fetch')
   .action(async (options, skillName) => {
+    void maybeNotifyOfUpdates();
     if (options.status) {
       const statuses = await syncStatus();
       printStatus(statuses);
@@ -1386,11 +1403,36 @@ cli
       }
     }
 
+    let prefixChange: 'rename' | 'parallel' | 'abort' | undefined;
+    if (options.prefixChange) {
+      if (
+        options.prefixChange === 'rename' ||
+        options.prefixChange === 'parallel' ||
+        options.prefixChange === 'abort'
+      ) {
+        prefixChange = options.prefixChange;
+      } else {
+        console.error(
+          `${red('❌ Error:')} --prefix-change must be one of: rename, parallel, abort`,
+        );
+        Deno.exit(1);
+      }
+    }
+
     const targets = options.targets
       ? options.targets.split(',').map((t) => t.trim()).filter((t) => t.length > 0)
       : undefined;
 
-    const syncOpts: SyncOptions = { targets, method, dryRun: options.dryRun };
+    // `--no-fetch` flips the cliffy-supplied `options.fetch` to false; default
+    // is to fetch upstream when the skill is tracked.
+    const syncOpts: SyncOptions = {
+      targets,
+      method,
+      dryRun: options.dryRun,
+      fetchUpstream: options.fetch !== false,
+      force: options.force,
+      prefixChange,
+    };
     const results = skillName
       ? await syncSkill(skillName, syncOpts)
       : await syncAll(syncOpts);
@@ -1399,6 +1441,43 @@ cli
 
     const failed = results.some((r) => r.action === 'failed');
     Deno.exit(failed ? 1 : 0);
+  });
+
+// Updates command — check tracked skills for upstream changes.
+cli
+  .command('updates [skill-name:string:active-skill]')
+  .description('Check tracked skills for upstream changes')
+  .option('--sync', 'Also sync any skills with detected updates')
+  .example('Check all tracked skills', 'rei updates')
+  .example('Check a single skill', 'rei updates book-review')
+  .example('Check and pull', 'rei updates --sync')
+  .action(async (options, skillName) => {
+    const checks = await checkForUpdates(skillName);
+    const updated = checks.filter((c) => c.hasUpdate).map((c) => c.skillName);
+    const skipped = checks.filter((c) => c.skipped);
+
+    if (updated.length === 0) {
+      console.log(`${green('✨ Up to date')} ${dim(italic(`(${checks.length} checked)`))}`);
+    } else {
+      const noun = updated.length === 1 ? 'skill has' : 'skills have';
+      console.log(
+        `${green('✨')} ${updated.length} ${noun} upstream updates: ${
+          updated.map((n) => magenta(n)).join(', ')
+        }`,
+      );
+    }
+    for (const s of skipped) {
+      console.log(`  ${dim(italic(`skipped ${s.skillName}: ${s.reason}`))}`);
+    }
+
+    if (options.sync && updated.length > 0) {
+      for (const name of updated) {
+        const results = await syncSkill(name, { fetchUpstream: true });
+        printSummary(results);
+      }
+    }
+
+    Deno.exit(0);
   });
 
 // Completions command (auto-generates shell completions for bash, fish, zsh)

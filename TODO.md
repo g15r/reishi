@@ -214,13 +214,15 @@ Core engine for distributing skills from source to named targets.
 
 Pull latest from upstream for tracked skills and update the source of truth.
 
-- [ ] `rei sync [skill-name]` — re-fetch from `source_url` + `ref` + `subpath`, overwrite source, update `synced_at`
-- [ ] For multi-skill repos, sync pulls the full repo once, updates all skills from that repo
-- [ ] Dry-run mode: `rei sync --dry-run` shows what would change without writing
-- [ ] Diff preview: show file-level changes before applying (added, modified, removed files)
-- [ ] Confirm before overwriting local modifications (detect via checksum or mtime)
-- [ ] After source update, re-sync to all configured targets
-- [ ] Tests: sync updates source files, synced_at timestamp updates, dry-run makes no changes, local modification detection works
+- [x] `rei sync [skill-name]` — re-fetch from `source_url` + `ref` + `subpath`, overwrite source, update `synced_at`
+- [x] For multi-skill repos, sync pulls just the requested skill's subpath from the shared tarball
+- [x] Dry-run mode: `rei sync --dry-run` previews upstream + target changes without writing
+- [x] Diff preview: file-level summary (added, modified, removed) printed after fetch
+- [x] Local-modification detection via mtime vs `synced_at`; `--force` bypasses the prompt
+- [x] After source update, re-sync to all configured targets
+- [x] `--no-fetch` bypass keeps Phase 3's pure target-sync behavior available
+- [x] Auto-sync triggers (`add`, `activate`, `init`) opt out of the upstream fetch
+- [x] Tests: sync updates source files, synced_at timestamp updates, dry-run makes no changes, local modification detection works (`sync_fetch_test.ts`)
 
 ### Prefix change detection
 
