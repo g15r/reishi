@@ -41,6 +41,7 @@ rei validate my-skill
 | `deactivate <skill-name>` | Move skill from active to deactivated (alias: `off`) |
 | `add <skill-name>` | Install a skill or directory of skills from GitHub (alias: `a`) |
 | `list <skill-name>` | List all active skills (alias: `ls`, include deactivated with `-a/--all`) |
+| `config <subcommand>` | Inspect and manage the reishi config (`init`, `show`, `path`, `edit`) |
 
 ## Command Details
 
@@ -97,6 +98,26 @@ deno task cli refresh-docs
 ```
 
 Downloads to: `agents/skills/develop-agent-skills/` (the overview.md and related reference docs)
+
+### config
+
+Manage the reishi config file (TOML, at `~/.config/reishi/config.toml` by default):
+
+```bash
+# Create the config file and source directories
+deno task cli config init
+
+# Print the effective config (merged with defaults)
+deno task cli config show
+
+# Print the config file path (useful for shell piping)
+deno task cli config path
+
+# Open the config in $EDITOR
+deno task cli config edit
+```
+
+Set `REISHI_CONFIG=/path/to/config.toml` to override the config location (handy for tests or multiple profiles).
 
 ### activate / deactivate
 

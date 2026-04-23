@@ -1,4 +1,4 @@
-#!/usr/bin/env -S deno run --allow-read --allow-write --allow-env=HOME --allow-net=platform.claude.com,code.claude.com,github.com,codeload.github.com --allow-run=tar
+#!/usr/bin/env -S deno run --allow-read --allow-write --allow-env=HOME,EDITOR,REISHI_CONFIG --allow-net=platform.claude.com,code.claude.com,github.com,codeload.github.com --allow-run
 
 /**
  * reishi - Unified CLI for Claude Agent Skill management
@@ -15,11 +15,13 @@
  */
 
 import { parse as parseYAML } from '@std/yaml';
+import { stringify as stringifyTOML } from '@std/toml';
 import { join, resolve } from '@std/path';
 import { exists, move } from '@std/fs';
 import { Command } from '@cliffy/command';
 import { CompletionsCommand } from '@cliffy/command/completions';
 import { dim, green, italic, magenta, red, yellow } from '@std/fmt/colors';
+import { getConfigPath, initConfig, loadConfig } from './config.ts';
 
 // ============================================================================
 // Configuration
@@ -854,6 +856,90 @@ async function addSkill(githubUrl: string, destPath: string): Promise<boolean> {
 }
 
 // ============================================================================
+// Command: config
+// ============================================================================
+
+async function configInit(): Promise<boolean> {
+  try {
+    const result = await initConfig();
+    if (result.alreadyExisted) {
+      console.log(
+        `${yellow('🚧 Config already exists at')} ${magenta(result.configPath)}`,
+      );
+      console.log(
+        `   ${dim(italic('View it with'))} rei config show ${
+          dim(italic('or edit with'))
+        } rei config edit`,
+      );
+      return true;
+    }
+    console.log(`${green('✅ Created config')} ${magenta(result.configPath)} 🌀`);
+    for (const dir of result.createdDirs) {
+      console.log(`${green('✅ Created directory')} ${magenta(dir)}`);
+    }
+    if (result.createdDirs.length === 0) {
+      console.log(`   ${dim(italic('All source directories already existed.'))}`);
+    }
+    return true;
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    console.error(`${red('❌ Error initializing config:')} ${message}`);
+    return false;
+  }
+}
+
+async function configShow(): Promise<boolean> {
+  try {
+    const config = await loadConfig();
+    const rendered = stringifyTOML(config as unknown as Record<string, unknown>);
+    console.log(rendered.trimEnd());
+    return true;
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    console.error(`${red('❌ Error loading config:')} ${message}`);
+    return false;
+  }
+}
+
+function configPath(): boolean {
+  console.log(getConfigPath());
+  return true;
+}
+
+async function configEdit(): Promise<boolean> {
+  const editor = Deno.env.get('EDITOR');
+  if (!editor) {
+    console.error(`${red('❌ Error:')} $EDITOR is not set`);
+    console.error(
+      `   ${dim(italic('Set one in your shell, e.g.'))} export EDITOR=nvim`,
+    );
+    return false;
+  }
+
+  const path = getConfigPath();
+  if (!(await exists(path))) {
+    console.error(`${red('❌ Error:')} No config file at ${magenta(path)}`);
+    console.error(`   ${dim(italic('Run'))} rei config init ${dim(italic('first'))}`);
+    return false;
+  }
+
+  try {
+    const cmd = new Deno.Command(editor, {
+      args: [path],
+      stdin: 'inherit',
+      stdout: 'inherit',
+      stderr: 'inherit',
+    });
+    const { success } = await cmd.output();
+    return success;
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    console.error(`${red('❌ Error launching editor:')} ${message}`);
+    return false;
+  }
+}
+
+// ============================================================================
 // CLI Definition with Cliffy
 // ============================================================================
 // CLI Definition with Cliffy
@@ -982,6 +1068,43 @@ cli
     const success = await addSkill(githubUrl, options.path);
     Deno.exit(success ? 0 : 1);
   });
+
+// Config command (with subcommands: init, show, path, edit)
+const configCommand = new Command()
+  .description('Inspect and manage reishi config')
+  .action(function () {
+    this.showHelp();
+  })
+  .command('init')
+  .description('Create the reishi config file and source directories')
+  .example('Initialize config', 'rei config init')
+  .action(async () => {
+    const success = await configInit();
+    Deno.exit(success ? 0 : 1);
+  })
+  .command('show')
+  .description('Print the effective config (merged with defaults)')
+  .example('Show current config', 'rei config show')
+  .action(async () => {
+    const success = await configShow();
+    Deno.exit(success ? 0 : 1);
+  })
+  .command('path')
+  .description('Print the config file path')
+  .example('Pipe the path', 'cat $(rei config path)')
+  .action(() => {
+    const success = configPath();
+    Deno.exit(success ? 0 : 1);
+  })
+  .command('edit')
+  .description('Open the config file in $EDITOR')
+  .example('Edit config', 'rei config edit')
+  .action(async () => {
+    const success = await configEdit();
+    Deno.exit(success ? 0 : 1);
+  });
+
+cli.command('config', configCommand);
 
 // Completions command (auto-generates shell completions for bash, fish, zsh)
 cli.command('completions', new CompletionsCommand());

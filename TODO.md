@@ -8,22 +8,22 @@ TOML is the recommendation here. The project already uses `@std/yaml` for skill 
 
 Config lives at `~/.config/reishi/config.toml`.
 
-- [ ] Add `@std/toml` to imports
-- [ ] Define TypeScript types for the full config schema (see spec below)
-- [ ] Write `loadConfig()` — reads and parses `~/.config/reishi/config.toml`, returns typed config merged with defaults
-- [ ] Write `saveConfig()` — serializes and writes config back to disk
-- [ ] Write `initConfig()` — creates default config file and directories (`~/.config/reishi/skills/`, `rules/`) if they don't exist
-- [ ] Tests: config loading with defaults, partial config merging, missing file handling, invalid TOML errors, round-trip save/load fidelity
+- [x] Add `@std/toml` to imports
+- [x] Define TypeScript types for the full config schema (see spec below)
+- [x] Write `loadConfig()` — reads and parses `~/.config/reishi/config.toml`, returns typed config merged with defaults
+- [x] Write `saveConfig()` — serializes and writes config back to disk
+- [x] Write `initConfig()` — creates default config file and directories (`~/.config/reishi/skills/`, `rules/`) if they don't exist
+- [x] Tests: config loading with defaults, partial config merging, missing file handling, invalid TOML errors, round-trip save/load fidelity
 
 ### Config CLI command
 
 A `rei config` command for inspecting and modifying config from the terminal.
 
-- [ ] `rei config init` — runs `initConfig()`, creates default config and directories
-- [ ] `rei config show` — prints current effective config (merged with defaults)
-- [ ] `rei config path` — prints config file path
-- [ ] `rei config edit` — opens config in `$EDITOR`
-- [ ] Tests: each subcommand against a temp config dir
+- [x] `rei config init` — runs `initConfig()`, creates default config and directories
+- [x] `rei config show` — prints current effective config (merged with defaults)
+- [x] `rei config path` — prints config file path
+- [x] `rei config edit` — opens config in `$EDITOR`
+- [x] Tests: each subcommand against a temp config dir
 
 ### Compile and Homebrew release
 

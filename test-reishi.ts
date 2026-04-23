@@ -1,4 +1,4 @@
-#!/usr/bin/env -S deno run --allow-read --allow-write --allow-env=HOME,TMPDIR --allow-net=platform.claude.com,code.claude.com
+#!/usr/bin/env -S deno run --allow-read --allow-write --allow-env=HOME,TMPDIR,EDITOR,REISHI_CONFIG --allow-net=platform.claude.com,code.claude.com
 
 /**
  * Test suite for reishi
@@ -53,6 +53,7 @@ function test(name: string, fn: () => Promise<boolean> | boolean) {
 
 async function runrei(
   args: string[],
+  opts: { cwd?: string; env?: Record<string, string> } = {},
 ): Promise<{ code: number; stdout: string; stderr: string }> {
   const scriptPath = new URL('./reishi.ts', import.meta.url).pathname;
   const cmd = new Deno.Command('deno', {
@@ -60,11 +61,14 @@ async function runrei(
       'run',
       '--allow-read',
       '--allow-write',
-      '--allow-env=HOME,TMPDIR',
+      '--allow-env=HOME,TMPDIR,EDITOR,REISHI_CONFIG',
       '--allow-net=platform.claude.com,code.claude.com',
+      '--allow-run',
       scriptPath,
       ...args,
     ],
+    cwd: opts.cwd,
+    env: opts.env,
     stdout: 'piped',
     stderr: 'piped',
   });
@@ -335,6 +339,59 @@ async function main() {
       const result = await runrei(['completions', 'powershell']);
       return result.code !== 0;
     })();
+
+    // ---- Config command tests ----
+
+    // Isolated config dir so tests don't touch the user's real config.
+    const configHome = await Deno.makeTempDir({ prefix: 'reishi-config-home-' });
+    const configPath = join(configHome, 'config.toml');
+    const configEnv = { HOME: configHome, REISHI_CONFIG: configPath };
+
+    // Test 20: rei config path prints the config path
+    await test('config path prints a non-empty path ending in config.toml', async () => {
+      const result = await runrei(['config', 'path'], { env: configEnv });
+      if (result.code !== 0) {
+        console.log('   stderr:', result.stderr);
+        return false;
+      }
+      const line = result.stdout.trim();
+      return line.length > 0 && line.endsWith('config.toml');
+    })();
+
+    // Test 21: rei config init creates the config file
+    await test('config init creates config file at REISHI_CONFIG', async () => {
+      const result = await runrei(['config', 'init'], { env: configEnv });
+      if (result.code !== 0) {
+        console.log('   stderr:', result.stderr);
+        return false;
+      }
+      return await exists(configPath);
+    })();
+
+    // Test 22: rei config show prints valid TOML with expected keys
+    await test('config show prints TOML containing expected keys', async () => {
+      const result = await runrei(['config', 'show'], { env: configEnv });
+      if (result.code !== 0) {
+        console.log('   stderr:', result.stderr);
+        return false;
+      }
+      return (
+        result.stdout.includes('sync_method') &&
+        result.stdout.includes('[paths]') &&
+        result.stdout.includes('[updates]')
+      );
+    })();
+
+    // Test 23: rei config init run twice shows friendly already-exists message
+    await test('config init is idempotent with a friendly message', async () => {
+      const result = await runrei(['config', 'init'], { env: configEnv });
+      return (
+        result.code === 0 &&
+        (result.stdout.includes('already exists') || result.stdout.includes('already'))
+      );
+    })();
+
+    await cleanupTestDir(configHome);
 
     console.log(
       '\n═══════════════════════════════════════════════════════════',
