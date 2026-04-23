@@ -1,15 +1,19 @@
 /**
- * Tests for docs.ts — list/add/remove against isolated envs, local + fake
- * fetchers, and GitHub tree URLs served from fixture tarballs. Compile and
- * sync coverage is added alongside those features in later commits.
+ * Tests for docs.ts — list/add/remove against isolated envs, index
+ * compilation with frontmatter/priority/token budget handling, and target
+ * distribution of fragments. Full CLI sync wiring lives alongside its
+ * objective's commit.
  */
 
-import { assert, assertEquals, assertRejects } from '@std/assert';
+import { assert, assertEquals, assertRejects, assertStringIncludes } from '@std/assert';
 import { join } from '@std/path';
 import { exists } from '@std/fs';
+import { parse as parseTOML, stringify as stringifyTOML } from '@std/toml';
 import { resetPathCache } from './paths.ts';
 import {
   addFragment,
+  compileIndex,
+  compileToTarget,
   getDocProjectNames,
   getFragmentNames,
   listDocProjects,
@@ -22,6 +26,26 @@ import {
   makeFixtureTarball,
   setupIsolatedEnv,
 } from './test-helpers.ts';
+
+async function patchConfig(
+  configPath: string,
+  patch: Record<string, unknown>,
+): Promise<void> {
+  const raw = await Deno.readTextFile(configPath);
+  const current = parseTOML(raw) as Record<string, unknown>;
+  const next: Record<string, unknown> = { ...current };
+  for (const [k, v] of Object.entries(patch)) {
+    if (
+      v && typeof v === 'object' && !Array.isArray(v) &&
+      current[k] && typeof current[k] === 'object' && !Array.isArray(current[k])
+    ) {
+      next[k] = { ...(current[k] as Record<string, unknown>), ...(v as Record<string, unknown>) };
+    } else {
+      next[k] = v;
+    }
+  }
+  await Deno.writeTextFile(configPath, stringifyTOML(next));
+}
 
 async function withEnv(
   env: Record<string, string>,
@@ -308,6 +332,220 @@ Deno.test('getDocProjectNames + getFragmentNames: return sorted names', async ()
         'api-conventions.md',
         'testing.md',
       ]);
+    });
+  } finally {
+    await env.cleanup();
+  }
+});
+
+// ============================================================================
+// compileIndex
+// ============================================================================
+
+Deno.test('compileIndex: includes all fragments with descriptions', async () => {
+  const env = await setupIsolatedEnv();
+  try {
+    await withEnv(env.env, async () => {
+      await seedDocsSource(env.docsDir);
+      const index = await compileIndex('myproject-a', env.projectDir);
+      assertStringIncludes(index, '# myproject-a — docs index');
+      assertStringIncludes(index, '## api-conventions.md');
+      assertStringIncludes(index, 'API conventions for myproject-a.');
+      assertStringIncludes(index, '## testing.md');
+      // Testing.md's description should come from the first non-heading line.
+      assertStringIncludes(index, 'Run tests in isolated temp dirs.');
+      assertStringIncludes(index, '`.agents/docs/api-conventions.md`');
+    });
+  } finally {
+    await env.cleanup();
+  }
+});
+
+Deno.test('compileIndex: priority orders sections', async () => {
+  const env = await setupIsolatedEnv();
+  try {
+    await withEnv(env.env, async () => {
+      await Deno.mkdir(join(env.docsDir, 'proj'), { recursive: true });
+      // Alphabetically 'a' beats 'b', but priority pushes b first.
+      await Deno.writeTextFile(
+        join(env.docsDir, 'proj', 'a.md'),
+        '---\ndescription: Low.\npriority: 1\n---\n\nbody\n',
+      );
+      await Deno.writeTextFile(
+        join(env.docsDir, 'proj', 'b.md'),
+        '---\ndescription: High.\npriority: 10\n---\n\nbody\n',
+      );
+      const index = await compileIndex('proj', env.projectDir);
+      const bIdx = index.indexOf('## b.md');
+      const aIdx = index.indexOf('## a.md');
+      assert(bIdx > -1 && aIdx > -1 && bIdx < aIdx, 'expected b before a');
+    });
+  } finally {
+    await env.cleanup();
+  }
+});
+
+Deno.test('compileIndex: falls back to first non-heading paragraph, then heading', async () => {
+  const env = await setupIsolatedEnv();
+  try {
+    await withEnv(env.env, async () => {
+      await Deno.mkdir(join(env.docsDir, 'proj'), { recursive: true });
+      await Deno.writeTextFile(
+        join(env.docsDir, 'proj', 'paragraph.md'),
+        '# Heading\n\nFirst paragraph line wins.\n',
+      );
+      await Deno.writeTextFile(
+        join(env.docsDir, 'proj', 'headingonly.md'),
+        '# Just A Heading\n',
+      );
+      const index = await compileIndex('proj', env.projectDir);
+      assertStringIncludes(index, 'First paragraph line wins.');
+      assertStringIncludes(index, 'Just A Heading');
+    });
+  } finally {
+    await env.cleanup();
+  }
+});
+
+Deno.test('compileIndex: token budget truncates and appends omitted line', async () => {
+  const env = await setupIsolatedEnv();
+  try {
+    await withEnv(env.env, async () => {
+      // Tight budget — smaller than one fragment section costs.
+      await patchConfig(env.configPath, {
+        docs: {
+          source: env.docsDir,
+          default_target: '.agents/docs',
+          index_filename: 'AGENTS.md',
+          token_budget: 40,
+        },
+      });
+      resetPathCache();
+
+      await Deno.mkdir(join(env.docsDir, 'proj'), { recursive: true });
+      for (const name of ['a.md', 'b.md', 'c.md']) {
+        await Deno.writeTextFile(
+          join(env.docsDir, 'proj', name),
+          `---\ndescription: ${name} description with enough text to cost tokens.\n---\n\nbody\n`,
+        );
+      }
+      const index = await compileIndex('proj', env.projectDir);
+      assertStringIncludes(index, 'more fragment');
+      assertStringIncludes(index, 'omitted');
+      // At least one section must still appear — we always include one fragment
+      // even if it alone exceeds the budget.
+      assertStringIncludes(index, '## a.md');
+    });
+  } finally {
+    await env.cleanup();
+  }
+});
+
+Deno.test('compileIndex: respects fragments filter', async () => {
+  const env = await setupIsolatedEnv();
+  try {
+    await withEnv(env.env, async () => {
+      await seedDocsSource(env.docsDir);
+      const index = await compileIndex('myproject-a', env.projectDir, {
+        fragments: ['api-conventions.md'],
+      });
+      assertStringIncludes(index, '## api-conventions.md');
+      assert(!index.includes('## testing.md'));
+    });
+  } finally {
+    await env.cleanup();
+  }
+});
+
+// ============================================================================
+// compileToTarget
+// ============================================================================
+
+Deno.test('compileToTarget: writes index + fragments to target dir', async () => {
+  const env = await setupIsolatedEnv();
+  try {
+    await withEnv(env.env, async () => {
+      await seedDocsSource(env.docsDir);
+      const result = await compileToTarget('myproject-a', env.projectDir);
+      assertEquals(result.action, 'copied');
+      assertEquals(result.fragmentsWritten, 2);
+
+      const indexPath = join(env.projectDir, 'AGENTS.md');
+      assert(await exists(indexPath));
+      const indexText = await Deno.readTextFile(indexPath);
+      assertStringIncludes(indexText, '# myproject-a — docs index');
+
+      const apiCopy = join(env.projectDir, '.agents', 'docs', 'api-conventions.md');
+      assert(await exists(apiCopy));
+      const testingCopy = join(env.projectDir, '.agents', 'docs', 'testing.md');
+      assert(await exists(testingCopy));
+    });
+  } finally {
+    await env.cleanup();
+  }
+});
+
+Deno.test('compileToTarget: --stdout writes nothing', async () => {
+  const env = await setupIsolatedEnv();
+  try {
+    await withEnv(env.env, async () => {
+      await seedDocsSource(env.docsDir);
+      const result = await compileToTarget('myproject-a', env.projectDir, {
+        stdout: true,
+      });
+      assertEquals(result.action, 'skipped');
+      assert(!(await exists(join(env.projectDir, 'AGENTS.md'))));
+      assert(!(await exists(join(env.projectDir, '.agents'))));
+    });
+  } finally {
+    await env.cleanup();
+  }
+});
+
+Deno.test('compileToTarget: --dry-run writes nothing', async () => {
+  const env = await setupIsolatedEnv();
+  try {
+    await withEnv(env.env, async () => {
+      await seedDocsSource(env.docsDir);
+      const result = await compileToTarget('myproject-a', env.projectDir, {
+        dryRun: true,
+      });
+      assertEquals(result.reason, 'dry run');
+      assert(!(await exists(join(env.projectDir, 'AGENTS.md'))));
+    });
+  } finally {
+    await env.cleanup();
+  }
+});
+
+Deno.test('compileToTarget: symlink mode links back to absolute source', async () => {
+  const env = await setupIsolatedEnv();
+  try {
+    await withEnv(env.env, async () => {
+      await seedDocsSource(env.docsDir);
+      const result = await compileToTarget('myproject-a', env.projectDir, {
+        method: 'symlink',
+      });
+      assertEquals(result.action, 'symlinked');
+      const apiTarget = join(env.projectDir, '.agents', 'docs', 'api-conventions.md');
+      const lst = await Deno.lstat(apiTarget);
+      assert(lst.isSymlink);
+    });
+  } finally {
+    await env.cleanup();
+  }
+});
+
+Deno.test('compileToTarget: re-compile clears stale fragments', async () => {
+  const env = await setupIsolatedEnv();
+  try {
+    await withEnv(env.env, async () => {
+      await seedDocsSource(env.docsDir);
+      await compileToTarget('myproject-a', env.projectDir);
+      await removeFragment('myproject-a', 'testing.md');
+      await compileToTarget('myproject-a', env.projectDir);
+      const staleCopy = join(env.projectDir, '.agents', 'docs', 'testing.md');
+      assert(!(await exists(staleCopy)));
     });
   } finally {
     await env.cleanup();

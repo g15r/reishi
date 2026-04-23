@@ -287,13 +287,13 @@ Docs are organized by project subdirectory under `docs.source` and compiled into
 
 Compile doc fragments into a single token-efficient AGENTS.md index file for a project.
 
-- [ ] Write `compileIndex(projectName, targetDir)` — reads all fragments, generates a markdown index with relative links to the fragments
-- [ ] Index format: heading per fragment, one-line description (from frontmatter or first paragraph), and link to the full fragment
-- [ ] Keep index under a configurable token budget — prioritize by fragment ordering or explicit priority frontmatter
-- [ ] `rei docs compile <project> <target-dir>` — compile index and copy/symlink fragments to target
-- [ ] The compiled index goes to `<target-dir>/<index_filename>` (default `AGENTS.md`)
-- [ ] Fragments go to `<target-dir>/<docs.default_target>/` (default `.agents/docs/`)
-- [ ] Tests: index contains all fragments, links resolve correctly, respects token budget, frontmatter priority ordering
+- [x] Write `compileIndex(projectName, targetDir)` — reads all fragments, generates a markdown index with relative links to the fragments
+- [x] Index format: heading per fragment, one-line description (from frontmatter or first paragraph), and link to the full fragment
+- [x] Keep index under a configurable token budget — prioritize by fragment ordering or explicit priority frontmatter
+- [x] `rei docs compile <project> <target-dir>` — compile index and copy/symlink fragments to target (`--dry-run`, `--stdout`, `--method`)
+- [x] The compiled index goes to `<target-dir>/<index_filename>` (default `AGENTS.md`)
+- [x] Fragments go to `<target-dir>/<docs.default_target>/` (default `.agents/docs/`)
+- [x] Tests: index contains all fragments, links resolve correctly, respects token budget, frontmatter priority ordering
 
 ### Docs sync and project mapping
 

@@ -51,6 +51,8 @@ import {
 } from './rules.ts';
 import {
   addFragment,
+  compileToTarget,
+  formatCompileSummary,
   getDocProjectNames,
   listDocProjects,
   listFragments,
@@ -1732,6 +1734,43 @@ const docsCommand = new Command()
       console.error(`${red('❌ Error:')} ${message}`);
       Deno.exit(1);
     }
+  })
+  .command('compile <project:string:doc-project> <target-dir:string>')
+  .description('Compile a docs index and distribute fragments to a target dir')
+  .option('--method <method:string>', 'Override sync method: copy or symlink')
+  .option('--dry-run', 'Plan only — do not write')
+  .option('--stdout', 'Emit the index to stdout instead of writing')
+  .example('Compile for a project dir', 'rei docs compile myproject ~/code/myproject')
+  .example('Preview the index', 'rei docs compile myproject ~/code/myproject --stdout')
+  .action(async (options, project, targetDir) => {
+    let method: 'copy' | 'symlink' | undefined;
+    if (options.method) {
+      if (options.method === 'copy' || options.method === 'symlink') {
+        method = options.method;
+      } else {
+        console.error(`${red('❌ Error:')} --method must be 'copy' or 'symlink'`);
+        Deno.exit(1);
+      }
+    }
+    const result = await compileToTarget(project, targetDir, {
+      method,
+      dryRun: options.dryRun,
+      stdout: options.stdout,
+    });
+    if (options.stdout) {
+      console.log(result.index);
+      Deno.exit(0);
+    }
+    const config = await loadConfig();
+    console.log(
+      formatCompileSummary(
+        project,
+        result,
+        config.docs.index_filename,
+        config.docs.default_target,
+      ),
+    );
+    Deno.exit(result.action === 'failed' ? 1 : 0);
   });
 
 cli.command('docs', docsCommand);
