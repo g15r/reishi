@@ -20,17 +20,20 @@
     }
   },
   "imports": {
+    "@std/assert": "jsr:@std/assert@^1.0.11",
     "@std/cli": "jsr:@std/cli@^1.0.28",
     "@std/fs": "jsr:@std/fs@^1.0.23",
     "@std/path": "jsr:@std/path@^1.1.4",
     "@std/fmt/colors": "jsr:@std/fmt@^1.0.9/colors",
     "@std/yaml": "jsr:@std/yaml@^1.0.12",
+    "@std/toml": "jsr:@std/toml@^1.0.9",
     "@cliffy/command": "jsr:@cliffy/command@^1.0.0"
   },
   "tasks": {
-    "cli": "deno run --allow-read --allow-write --allow-env=HOME --allow-net=platform.claude.com,code.claude.com,github.com,codeload.github.com --allow-run=tar reishi.ts",
-    "check": "deno check reishi.ts",
-    "test": "deno run --allow-read --allow-write --allow-run=deno,tar --allow-env=HOME,TMPDIR --allow-net=platform.claude.com,code.claude.com,github.com,codeload.github.com test-reishi.ts",
-    "install": "deno install --global --config=./deno.json --allow-read --allow-write --allow-env=HOME --allow-net=platform.claude.com,code.claude.com,github.com,codeload.github.com --allow-run=tar --name rei --force reishi.ts"
+    "cli": "deno run --allow-read --allow-write --allow-env=HOME,EDITOR,REISHI_CONFIG --allow-net=platform.claude.com,code.claude.com,github.com,codeload.github.com --allow-run reishi.ts",
+    "check": "deno check reishi.ts config.ts",
+    "test:unit": "deno test --allow-read --allow-write --allow-env config_test.ts",
+    "test": "deno test --allow-read --allow-write --allow-env config_test.ts && deno run --allow-read --allow-write --allow-run=deno,tar --allow-env=HOME,TMPDIR,EDITOR,REISHI_CONFIG --allow-net=platform.claude.com,code.claude.com,github.com,codeload.github.com test-reishi.ts",
+    "install": "deno install --global --config=./deno.json --allow-read --allow-write --allow-env=HOME,EDITOR,REISHI_CONFIG --allow-net=platform.claude.com,code.claude.com,github.com,codeload.github.com --allow-run --name rei --force reishi.ts"
   }
 }
