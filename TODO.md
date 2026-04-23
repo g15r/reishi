@@ -277,11 +277,11 @@ Rules are global, always-on markdown files that get symlinked/copied to agent ru
 
 Docs are organized by project subdirectory under `docs.source` and compiled into a token-efficient index for each project.
 
-- [ ] Define docs directory structure: `~/.config/reishi/docs/<project-name>/<fragment>.md`
-- [ ] `rei docs list [project]` — list all doc projects, or fragments within a project
-- [ ] `rei docs add <project> <path-or-url>` — add a doc fragment to a project's collection
-- [ ] `rei docs remove <project> <fragment>` — remove a fragment
-- [ ] Tests: directory structure creation, add/remove/list operations
+- [x] Define docs directory structure: `~/.config/reishi/docs/<project-name>/<fragment>.md`
+- [x] `rei docs list [project]` — list all doc projects, or fragments within a project
+- [x] `rei docs add <project> <path-or-url>` — add a doc fragment to a project's collection
+- [x] `rei docs remove <project> <fragment>` — remove a fragment
+- [x] Tests: directory structure creation, add/remove/list operations
 
 ### Index compilation
 

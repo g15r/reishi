@@ -24,6 +24,13 @@ export interface IsolatedEnv {
   home: string;
   /** Isolated source-of-truth skills dir. */
   sourceDir: string;
+  /** Isolated docs source dir (`<configDir>/docs`). */
+  docsDir: string;
+  /**
+   * A temp dir under home that tests can treat as a project root for docs
+   * sync — its parent (`home`) always exists.
+   */
+  projectDir: string;
   /** Env map suitable for Deno.Command.env (HOME + REISHI_CONFIG). */
   env: Record<string, string>;
   /** Remove the temp dir. Safe to call twice. */
@@ -45,6 +52,11 @@ export async function setupIsolatedEnv(
   const sourceDir = join(configDir, 'skills');
   await Deno.mkdir(sourceDir, { recursive: true });
 
+  const docsDir = join(configDir, 'docs');
+  const projectDir = join(home, 'projects', 'sample');
+  // Pre-create the parent dir so docs sync (which refuses to mkdir when the
+  // parent is missing) can write into projectDir on first run.
+  await Deno.mkdir(join(home, 'projects'), { recursive: true });
   const config: Record<string, unknown> = {
     sync_method: overrides.sync_method ?? 'copy',
     default_prefix: overrides.default_prefix ?? 'none',
@@ -59,9 +71,10 @@ export async function setupIsolatedEnv(
       targets: { claude: join(home, '.claude', 'rules') },
     },
     docs: {
-      source: join(configDir, 'docs'),
+      source: docsDir,
       default_target: '.agents/docs',
       index_filename: 'AGENTS.md',
+      token_budget: 4000,
     },
   };
   await Deno.writeTextFile(configPath, stringifyTOML(config));
@@ -70,6 +83,8 @@ export async function setupIsolatedEnv(
     configPath,
     home,
     sourceDir,
+    docsDir,
+    projectDir,
     env: { HOME: home, REISHI_CONFIG: configPath },
     cleanup: async () => {
       try {

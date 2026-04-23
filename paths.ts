@@ -9,14 +9,22 @@
 import { join } from '@std/path';
 import { expandHome, loadConfig } from './config.ts';
 
-let cached: { source: string; deactivated: string; rules: string } | null = null;
+interface CachedPaths {
+  source: string;
+  deactivated: string;
+  rules: string;
+  docs: string;
+}
 
-async function resolve(): Promise<{ source: string; deactivated: string; rules: string }> {
+let cached: CachedPaths | null = null;
+
+async function resolve(): Promise<CachedPaths> {
   if (cached) return cached;
   const config = await loadConfig();
   const source = expandHome(config.paths.source);
   const rules = expandHome(config.rules.source);
-  cached = { source, deactivated: join(source, '_deactivated'), rules };
+  const docs = expandHome(config.docs.source);
+  cached = { source, deactivated: join(source, '_deactivated'), rules, docs };
   return cached;
 }
 
@@ -33,6 +41,11 @@ export async function getDeactivatedDir(): Promise<string> {
 /** Absolute path to the configured rules source dir. */
 export async function getRulesSourceDir(): Promise<string> {
   return (await resolve()).rules;
+}
+
+/** Absolute path to the configured docs source dir. */
+export async function getDocsSourceDir(): Promise<string> {
+  return (await resolve()).docs;
 }
 
 /** Clear the cached paths — tests that swap REISHI_CONFIG mid-run need this. */

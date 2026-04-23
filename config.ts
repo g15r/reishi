@@ -35,11 +35,25 @@ export interface RulesConfig {
   targets: Record<string, string>;
 }
 
+export interface DocsProjectEntry {
+  /** Absolute or `~`-prefixed path to the project root. */
+  target: string;
+  /**
+   * Restrict compiled output to this subset of fragment filenames (basenames
+   * in the project's docs.source dir). Undefined = all fragments.
+   */
+  fragments?: string[];
+}
+
 export interface DocsConfig {
   source: string;
   default_target: string;
   index_filename: string;
   sync_method?: SyncMethod;
+  /** Soft cap on the compiled index size, in approximate tokens (chars/4). */
+  token_budget?: number;
+  /** Named project mappings used by `rei docs sync`. */
+  projects?: Record<string, DocsProjectEntry>;
 }
 
 // Populated in Phase 2 — interface shape only; no behavior wired yet.
@@ -126,6 +140,7 @@ export function defaultConfig(): ConfigSchema {
       source: '~/.config/reishi/docs',
       default_target: '.agents/docs',
       index_filename: 'AGENTS.md',
+      token_budget: 4000,
     },
   };
 }
@@ -269,8 +284,17 @@ default_target = ".agents/docs"
 # Name of the compiled index file placed in the project root
 index_filename = "AGENTS.md"
 
+# Soft cap on the compiled index size, in approximate tokens (chars/4).
+# token_budget = 4000
+
 # Sync method override for docs
 # sync_method = "symlink"
+
+# Named project mappings — the target is a project root on disk. Fragments
+# are optional; omit to include every fragment in <docs.source>/<name>/.
+# [docs.projects.myproject]
+# target = "~/code/myproject"
+# fragments = ["api-conventions.md", "testing.md"]
 `;
 
 /**

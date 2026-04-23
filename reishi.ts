@@ -49,6 +49,13 @@ import {
   syncRules,
   validateRules,
 } from './rules.ts';
+import {
+  addFragment,
+  getDocProjectNames,
+  listDocProjects,
+  listFragments,
+  removeFragment,
+} from './docs.ts';
 
 // ============================================================================
 // Configuration
@@ -1197,7 +1204,8 @@ const cli = new Command()
   .meta('Source of Truth', configuredSource)
   .globalComplete('active-skill', () => getActiveSkillNames())
   .globalComplete('deactivated-skill', () => getDeactivatedSkillNames())
-  .globalComplete('rule-name', () => getRuleNames());
+  .globalComplete('rule-name', () => getRuleNames())
+  .globalComplete('doc-project', () => getDocProjectNames());
 
 // Init command
 cli
@@ -1641,6 +1649,92 @@ const rulesCommand = new Command()
   });
 
 cli.command('rules', rulesCommand);
+
+// Docs command (with subcommands: list, add, remove, compile, sync)
+const docsCommand = new Command()
+  .description('Manage project-scoped doc fragments and compile a token-efficient index')
+  .action(function () {
+    this.showHelp();
+  })
+  .command('list [project:string:doc-project]')
+  .alias('ls')
+  .description('List doc projects, or fragments within a project')
+  .example('List doc projects', 'rei docs list')
+  .example('List fragments in a project', 'rei docs list myproject')
+  .action(async (_options, project) => {
+    if (project) {
+      const fragments = await listFragments(project);
+      if (fragments.length === 0) {
+        console.log(`No fragments in ${magenta(project)}.`);
+        Deno.exit(0);
+      }
+      for (const f of fragments) {
+        console.log(`  ${f.name} ${dim(italic(`(${f.size} bytes)`))}`);
+      }
+      console.log(
+        `\n${fragments.length} fragment${fragments.length === 1 ? '' : 's'} in ${magenta(project)}`,
+      );
+      Deno.exit(0);
+    }
+    const projects = await listDocProjects();
+    if (projects.length === 0) {
+      console.log('No doc projects found.');
+      Deno.exit(0);
+    }
+    for (const name of projects) {
+      const fragments = await listFragments(name);
+      console.log(
+        `  ${name} ${dim(italic(`(${fragments.length} fragment${fragments.length === 1 ? '' : 's'})`))}`,
+      );
+    }
+    console.log(
+      `\n${projects.length} doc project${projects.length === 1 ? '' : 's'}`,
+    );
+    Deno.exit(0);
+  })
+  .command('add <project:string:doc-project> <path-or-url:string>')
+  .description('Add a doc fragment to a project')
+  .option('--force', 'Overwrite an existing fragment with the same name')
+  .example('Add a local fragment', 'rei docs add myproject ./api-conventions.md')
+  .example('Add from URL', 'rei docs add myproject https://example.com/docs/api.md')
+  .example(
+    'Add from GitHub tree URL',
+    'rei docs add myproject https://github.com/org/repo/tree/main/docs/api.md',
+  )
+  .action(async (options, project, input) => {
+    try {
+      const dest = await addFragment(project, input, { force: options.force });
+      console.log(
+        `${green('✅ Added fragment')} ${magenta(dest)} ${dim(italic(`(project: ${project})`))}`,
+      );
+      Deno.exit(0);
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      console.error(`${red('❌ Error:')} ${message}`);
+      Deno.exit(1);
+    }
+  })
+  .command('remove <project:string:doc-project> <fragment:string>')
+  .alias('rm')
+  .description('Remove a fragment from a project (does not cascade to targets)')
+  .example('Remove a fragment', 'rei docs remove myproject api-conventions.md')
+  .action(async (_options, project, fragment) => {
+    try {
+      const dest = await removeFragment(project, fragment);
+      console.log(
+        `${green('✅ Removed fragment')} ${magenta(dest)} ${
+          dim(italic('(run `rei docs sync` to propagate)'))
+        }`,
+      );
+      Deno.exit(0);
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      console.error(`${red('❌ Error:')} ${message}`);
+      Deno.exit(1);
+    }
+  });
+
+cli.command('docs', docsCommand);
 
 // Completions command (auto-generates shell completions for bash, fish, zsh)
 cli.command('completions', new CompletionsCommand());
