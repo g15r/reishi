@@ -1,6 +1,9 @@
 ### Nextjs
 # See https://help.github.com/articles/ignoring-files/ for more about ignoring files.
 
+# compiled binaries (deno compile output)
+/bin/
+
 # dependencies
 /node_modules
 /.pnp
