@@ -324,43 +324,51 @@ target = "~/code/myproject"
 Run the comprehensive test suite:
 
 ```bash
-deno task test
+deno task test          # Deno unit tests + integration harness + compiled-binary smoke tests
+deno task test:unit     # Just the fast Deno.test modules (config, paths, sync, rules, docs, etc.)
+deno task test:compile  # Just the compiled-binary smoke tests (slow — builds bin/rei first)
 ```
 
-Tests include:
+Coverage spans config loading, path resolution, sync engine (copy/symlink, targets, dry-run, staleness), upstream fetch, prefix-change detection, update polling, rules, docs index compilation, and end-to-end CLI flows. All tests use `REISHI_CONFIG`-redirected tempdirs and the offline fixture helpers in `test-helpers.ts` / `test-fixtures/` — nothing hits live GitHub.
 
-- Help/version commands
-- Skill creation with all files
-- Validation rules (name format, required fields, unexpected keys)
-- Template interpolation
-- Error handling
-- File permissions
+## Source layout
 
-All tests run in isolated temporary directories.
+- `reishi.ts` — Cliffy command definitions and action wiring
+- `config.ts` — TOML schema, `loadConfig` / `saveConfig` / `initConfig`, deep-merge with defaults
+- `paths.ts` — resolves `paths.source`, `rules.source`, `docs.source`, cached per session
+- `sync.ts` — target sync engine, upstream fetch, prefix-change flow, `checkForUpdates`
+- `rules.ts` — rules CRUD + sync
+- `docs.ts` — fragment CRUD, index compilation with token budget, per-project distribution
+- `test-helpers.ts` — `setupIsolatedEnv`, `makeFixtureTarball`, `fakeFetchGithub`
+- `assets/` — SKILL.md + example file templates (embedded in the compiled binary via `--include`)
+- `scripts/compile-all.sh` — cross-compile to all four `{os}-{arch}` targets
+- `.github/workflows/release.yml` — release workflow (tarballs + Homebrew tap publish)
 
 ## Development Tips
 
-1. **Make changes**: Edit `reishi.ts`
+1. **Make changes**: edit the relevant module (`reishi.ts` for CLI wiring, `config.ts`/`sync.ts`/`rules.ts`/`docs.ts` for feature logic)
 2. **Type check**: `deno task check`
-3. **Test**: `deno task test`
+3. **Test**: `deno task test` (or `test:unit` for fast feedback)
 4. **Try it**: `deno task cli <command>`
-5. **Deploy**: `deno task install` (updates global binary)
+5. **Compile**: `deno task compile` (builds `bin/rei` for the current platform)
+6. **Deploy**: `deno task install` (updates the global `rei` binary at `~/.local/bin/rei`)
 
-No need to reinstall the binary during development - just use the task commands!
+No need to reinstall the binary during development — just use the task commands.
 
 ## Architecture
 
 Built with:
 
-- **Deno** - Secure by default, TypeScript native
-- **Deno Standard Library** - File ops, path handling, YAML parsing
-- **Cliffy** - The most popular Deno CLI framework (now with cross-runtime support for Bun and Node) with great help text and validation
+- **Deno** — secure by default, TypeScript native, cross-compile to static binaries
+- **Deno standard library** — `@std/toml` (config), `@std/yaml` (skill frontmatter), `@std/fs`, `@std/path`, `@std/fmt/colors`
+- **Cliffy** — declarative CLI framework with dynamic tab completion
+- **Offline-first tests** — fetch injection (`HttpFetcher` / `TarballFetcher`) keeps the full suite hermetic
 
 Key features:
 
-- Declarative command structure
-- Comprehensive validation
-- Helpful error messages
-- Dry-run friendly
-- Permission-scoped (no unnecessary access)
-- Built-in generation of shell completions and aliases
+- Single portable binary per platform (Homebrew-distributable)
+- TOML config with sensible defaults; nothing required to get started
+- Copy or symlink sync methods with per-content-type and per-skill overrides
+- Offline test fixtures so `add` / `sync` / `updates` flows can be exercised without live GitHub
+- Dry-run everywhere, friendly staleness reports, non-interactive flags for CI
+- Delightful one-line summaries after multi-content sync
