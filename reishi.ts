@@ -699,7 +699,19 @@ async function installSkill(
   }
 }
 
-async function addSkill(githubUrl: string, destPath: string): Promise<boolean> {
+/** Narrow fetch signature: tests only need URL-to-Response behavior. */
+export type TarballFetcher = (url: string) => Promise<Response>;
+
+export interface AddSkillOptions {
+  /** Injected fetcher for tests. Defaults to global `fetch`. */
+  fetcher?: TarballFetcher;
+}
+
+async function addSkill(
+  githubUrl: string,
+  destPath: string,
+  options: AddSkillOptions = {},
+): Promise<boolean> {
   // Parse GitHub tree URL: https://github.com/user/repo/tree/ref[/subpath]
   // Takes the first path segment after /tree/ as the ref — handles main, master,
   // develop, staging, trunk, etc. Multi-segment branch names (e.g. feature/x) are
@@ -724,12 +736,14 @@ async function addSkill(githubUrl: string, destPath: string): Promise<boolean> {
 
   console.log(`Adding from ${magenta(`${user}/${repo}`)} @ ${magenta(ref)}...`);
 
+  const fetcher: TarballFetcher = options.fetcher ?? fetch;
+
   // Try branch then tag
-  let response = await fetch(
+  let response = await fetcher(
     `https://github.com/${user}/${repo}/archive/refs/heads/${ref}.tar.gz`,
   );
   if (!response.ok && response.status === 404) {
-    response = await fetch(
+    response = await fetcher(
       `https://github.com/${user}/${repo}/archive/refs/tags/${ref}.tar.gz`,
     );
   }
@@ -860,6 +874,8 @@ async function addSkill(githubUrl: string, destPath: string): Promise<boolean> {
     }
   }
 }
+
+export { addSkill };
 
 // ============================================================================
 // Command: config
