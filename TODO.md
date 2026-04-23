@@ -256,13 +256,13 @@ Background check for upstream changes on tracked skills.
 
 Rules are global, always-on markdown files that get symlinked/copied to agent rule paths at session start.
 
-- [ ] `rei rules list` — list all rules in `rules.source` directory
-- [ ] `rei rules add <path-or-url>` — add a rule file to the rules source directory
-- [ ] `rei rules remove <name>` — remove a rule from source and all targets
-- [ ] `rei rules sync` — sync all rules from source to configured `rules.targets`
-- [ ] Respect global `sync_method` with `rules.sync_method` override
-- [ ] Support both individual `.md` files and directories of rules
-- [ ] Tests: add/remove/list operations, sync to multiple targets, sync_method override, file vs directory handling
+- [x] `rei rules list` — list all rules in `rules.source` directory
+- [x] `rei rules add <path-or-url>` — add a rule file to the rules source directory
+- [x] `rei rules remove <name>` — remove a rule from source and all targets
+- [x] `rei rules sync` — sync all rules from source to configured `rules.targets`
+- [x] Respect global `sync_method` with `rules.sync_method` override
+- [x] Support both individual `.md` files and directories of rules
+- [x] Tests: add/remove/list operations, sync to multiple targets, sync_method override, file vs directory handling
 
 ### Rules integration with existing workflow
 

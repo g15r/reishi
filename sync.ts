@@ -84,13 +84,16 @@ async function resolveTargets(
   return out;
 }
 
-/** Decide the sync method using the configured precedence. */
-function resolveMethod(
+/**
+ * Decide the sync method using the configured precedence.
+ * Exported so rules.ts can mirror the precedence: CLI > content-type > global.
+ */
+export function resolveMethod(
   globalMethod: SyncMethod,
-  skillMethod: SyncMethod | undefined,
+  contentTypeMethod: SyncMethod | undefined,
   override: SyncMethod | undefined,
 ): SyncMethod {
-  return override ?? skillMethod ?? globalMethod;
+  return override ?? contentTypeMethod ?? globalMethod;
 }
 
 /**

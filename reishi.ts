@@ -28,7 +28,7 @@ import {
   saveConfig,
   type SkillEntry,
 } from './config.ts';
-import { getDeactivatedDir, getSourceDir } from './paths.ts';
+import { getDeactivatedDir, getRulesSourceDir, getSourceDir } from './paths.ts';
 import {
   checkForUpdates,
   maybeNotifyOfUpdates,
@@ -40,6 +40,13 @@ import {
   type SyncOptions,
   unsyncSkill,
 } from './sync.ts';
+import {
+  addRule,
+  listRules,
+  printRulesSummary,
+  removeRule,
+  syncRules,
+} from './rules.ts';
 
 // ============================================================================
 // Configuration
@@ -1479,6 +1486,94 @@ cli
 
     Deno.exit(0);
   });
+
+// Rules command (with subcommands: list, add, remove, sync, validate)
+const rulesCommand = new Command()
+  .description('Manage global markdown rules distributed to agent rule paths')
+  .action(function () {
+    this.showHelp();
+  })
+  .command('list')
+  .alias('ls')
+  .description('List rules in rules.source')
+  .example('List rules', 'rei rules list')
+  .action(async () => {
+    const rules = await listRules();
+    if (rules.length === 0) {
+      console.log('No rules found.');
+      Deno.exit(0);
+    }
+    for (const rule of rules) {
+      const kind = rule.kind === 'directory' ? dim(italic('(dir)')) : '';
+      console.log(`  ${rule.name} ${kind}`);
+    }
+    console.log(`\n${rules.length} rule${rules.length === 1 ? '' : 's'}`);
+    Deno.exit(0);
+  })
+  .command('add <path-or-url:string>')
+  .description('Add a rule from a local path or URL')
+  .option('--force', 'Overwrite an existing rule with the same name')
+  .example('Add a local file', 'rei rules add ./no-deletes.md')
+  .example('Add a directory', 'rei rules add ./security')
+  .example('Add from URL', 'rei rules add https://example.com/rule.md')
+  .action(async (options, input) => {
+    try {
+      const dest = await addRule(input, { force: options.force });
+      console.log(`${green('✅ Added rule')} ${magenta(dest)}`);
+      Deno.exit(0);
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      console.error(`${red('❌ Error:')} ${message}`);
+      Deno.exit(1);
+    }
+  })
+  .command('remove <name:string>')
+  .alias('rm')
+  .description('Remove a rule from source and all targets')
+  .example('Remove a rule', 'rei rules remove no-deletes')
+  .action(async (_options, name) => {
+    try {
+      const results = await removeRule(name);
+      const removed = results.filter((r) => r.action === 'removed').length;
+      console.log(
+        `${green('✅ Removed')} ${magenta(name)} ${
+          dim(italic(`(${removed} target${removed === 1 ? '' : 's'} cleaned)`))
+        }`,
+      );
+      Deno.exit(0);
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      console.error(`${red('❌ Error:')} ${message}`);
+      Deno.exit(1);
+    }
+  })
+  .command('sync')
+  .description('Sync rules from source to configured targets')
+  .option('--targets <names:string>', 'Comma-separated target names to sync to')
+  .option('--method <method:string>', 'Override sync method: copy or symlink')
+  .option('--dry-run', 'Plan only — do not write')
+  .example('Sync all rules to all targets', 'rei rules sync')
+  .example('Sync to one target', 'rei rules sync --targets=claude')
+  .action(async (options) => {
+    let method: 'copy' | 'symlink' | undefined;
+    if (options.method) {
+      if (options.method === 'copy' || options.method === 'symlink') {
+        method = options.method;
+      } else {
+        console.error(`${red('❌ Error:')} --method must be 'copy' or 'symlink'`);
+        Deno.exit(1);
+      }
+    }
+    const targets = options.targets
+      ? options.targets.split(',').map((t) => t.trim()).filter((t) => t.length > 0)
+      : undefined;
+    const results = await syncRules({ targets, method, dryRun: options.dryRun });
+    printRulesSummary(results);
+    const failed = results.some((r) => r.action === 'failed');
+    Deno.exit(failed ? 1 : 0);
+  });
+
+cli.command('rules', rulesCommand);
 
 // Completions command (auto-generates shell completions for bash, fish, zsh)
 cli.command('completions', new CompletionsCommand());

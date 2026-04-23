@@ -12,6 +12,11 @@ import { stringify as stringifyTOML } from '@std/toml';
 const REPO_ROOT = resolve(dirname(fromFileUrl(import.meta.url)));
 const FIXTURES_ROOT = join(REPO_ROOT, 'test-fixtures', 'repos');
 
+/** Absolute path to a test-fixtures/<subdir> directory. */
+export function fixturesPath(...parts: string[]): string {
+  return join(REPO_ROOT, 'test-fixtures', ...parts);
+}
+
 export interface IsolatedEnv {
   /** Path to the isolated config.toml. */
   configPath: string;
