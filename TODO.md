@@ -303,6 +303,18 @@ Compile doc fragments into a single token-efficient AGENTS.md index file for a p
 - [x] Respect `sync_method` hierarchy (global > docs > CLI)
 - [x] Tests: project mapping resolves correctly, sync compiles and distributes, sync_method overrides work
 
+# v1.1
+
+Polish pass on top of v1. Not yet phased — candidate list.
+
+- [ ] Re-examine `--allow-run` permissions for `rei config edit` — currently wide-open in shebang/tasks so arbitrary `$EDITOR` can spawn; explore a narrower allowlist (e.g. `$REISHI_EDITOR` with a validated binary allowlist, or `--allow-run=vi,vim,nvim,nano,emacs,code,hx`)
+- [ ] Drop dead `void rulesDir;` reservation in `rules.ts`
+- [ ] Drop unused `printDocsSyncSummary` in `docs.ts`
+- [ ] Drop unused re-export of `getRulesSourceDir` in `reishi.ts`
+- [ ] `initConfig` should also pre-create the `_deactivated/` subdir under `paths.source` so `rei deactivate` on a fresh install doesn't do a runtime mkdir
+- [ ] `addRule` / `addFragment` silently rename non-`.md` URL downloads to `.md` — expose a `--as <name>` override flag
+- [ ] `checkForUpdates` writes config even on no-op runs — add a dirty-bit check to skip the write when nothing changed
+
 ## Backlog
 
 - [ ] `rei upgrade` — self-update mechanism
