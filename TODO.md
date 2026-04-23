@@ -191,14 +191,15 @@ Move the canonical skill storage from the current hardcoded chezmoi path to the 
 
 Core engine for distributing skills from source to named targets.
 
-- [ ] Write `syncSkill(skillName, targets?)` — copies or symlinks a single skill from source to specified (or all) targets
-- [ ] Write `syncAll(targets?)` — syncs all active skills to targets
-- [ ] Respect global `sync_method` with per-skill `sync_method` overrides winning
-- [ ] Respect per-skill `targets` list — if set, only sync to those named targets
-- [ ] Handle missing target directories gracefully (warn, create, or skip — configurable)
-- [ ] `rei sync [skill-name]` command — manual sync trigger, all skills or a specific one
-- [ ] `rei sync --status` — show sync state (which skills are in which targets, staleness)
-- [ ] Tests: copy sync creates independent files, symlink sync creates valid symlinks, per-skill target filtering works, sync_method override hierarchy works, missing target handling
+- [x] Write `syncSkill(skillName, options)` — copies or symlinks a single skill from source to specified (or all) targets
+- [x] Write `syncAll(options)` — syncs all active skills to targets (new module `sync.ts`)
+- [x] Respect global `sync_method` with per-skill `sync_method` overrides winning (CLI `--method` beats both)
+- [x] Respect per-skill `targets` list — if set, only sync to those named targets
+- [x] Handle missing target directories: create the immediate target if parent exists; skip + warn if parent is missing
+- [x] `rei sync [skill-name]` command with `--targets`, `--method`, `--dry-run`, `--status` flags
+- [x] `rei sync --status` — show sync state (present / stale / symlink / missing) per skill × target
+- [x] Helper `unsyncSkill(name)` for removing a skill from all targets (used by deactivate)
+- [x] Tests: copy sync creates independent files, symlink sync creates valid symlinks, per-skill target filtering works, sync_method override hierarchy works, missing target handling, dry-run, status staleness
 
 ### Wire sync into existing commands
 

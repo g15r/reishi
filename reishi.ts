@@ -29,6 +29,14 @@ import {
   type SkillEntry,
 } from './config.ts';
 import { getDeactivatedDir, getSourceDir } from './paths.ts';
+import {
+  printStatus,
+  printSummary,
+  syncAll,
+  syncSkill,
+  syncStatus,
+  type SyncOptions,
+} from './sync.ts';
 
 // ============================================================================
 // Configuration
@@ -1295,6 +1303,50 @@ const configCommand = new Command()
   });
 
 cli.command('config', configCommand);
+
+// Sync command
+cli
+  .command('sync [skill-name:string:active-skill]')
+  .description('Sync skills from the source of truth to configured targets')
+  .option('--targets <names:string>', 'Comma-separated target names to sync to')
+  .option('--method <method:string>', 'Override sync method: copy or symlink')
+  .option('--dry-run', 'Plan only — do not write')
+  .option('--status', 'Show sync state instead of syncing')
+  .example('Sync everything', 'rei sync')
+  .example('Sync one skill', 'rei sync book-review')
+  .example('Sync to a subset of targets', 'rei sync --targets=claude,agents')
+  .example('Show staleness report', 'rei sync --status')
+  .action(async (options, skillName) => {
+    if (options.status) {
+      const statuses = await syncStatus();
+      printStatus(statuses);
+      Deno.exit(0);
+    }
+
+    let method: 'copy' | 'symlink' | undefined;
+    if (options.method) {
+      if (options.method === 'copy' || options.method === 'symlink') {
+        method = options.method;
+      } else {
+        console.error(`${red('❌ Error:')} --method must be 'copy' or 'symlink'`);
+        Deno.exit(1);
+      }
+    }
+
+    const targets = options.targets
+      ? options.targets.split(',').map((t) => t.trim()).filter((t) => t.length > 0)
+      : undefined;
+
+    const syncOpts: SyncOptions = { targets, method, dryRun: options.dryRun };
+    const results = skillName
+      ? await syncSkill(skillName, syncOpts)
+      : await syncAll(syncOpts);
+
+    printSummary(results);
+
+    const failed = results.some((r) => r.action === 'failed');
+    Deno.exit(failed ? 1 : 0);
+  });
 
 // Completions command (auto-generates shell completions for bash, fish, zsh)
 cli.command('completions', new CompletionsCommand());
