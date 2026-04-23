@@ -21,7 +21,13 @@ import { exists, move } from '@std/fs';
 import { Command } from '@cliffy/command';
 import { CompletionsCommand } from '@cliffy/command/completions';
 import { dim, green, italic, magenta, red, yellow } from '@std/fmt/colors';
-import { getConfigPath, initConfig, loadConfig } from './config.ts';
+import {
+  getConfigPath,
+  initConfig,
+  loadConfig,
+  saveConfig,
+  type SkillEntry,
+} from './config.ts';
 
 // ============================================================================
 // Configuration
@@ -667,19 +673,30 @@ async function listSkills(all: boolean): Promise<boolean> {
 // Command: add
 // ============================================================================
 
+/**
+ * installSkill returns an outcome the caller can use to decide whether to
+ * write tracking metadata. `existed` signals a dir-already-exists skip so the
+ * caller can treat that as a re-track opportunity when tracking is enabled.
+ */
+interface InstallOutcome {
+  ok: boolean;
+  existed: boolean;
+  destDir: string;
+}
+
 async function installSkill(
   sourceDir: string,
   destPath: string,
   skillName: string,
   repoLabel: string,
-): Promise<boolean> {
+): Promise<InstallOutcome> {
   const destDir = join(destPath, skillName);
 
   if (await exists(destDir)) {
     console.error(
       `${yellow('🚧 Skipping')} ${magenta(skillName)}: already exists at ${magenta(destDir)}`,
     );
-    return false;
+    return { ok: false, existed: true, destDir };
   }
 
   try {
@@ -689,13 +706,13 @@ async function installSkill(
         magenta(destDir)
       }`,
     );
-    return true;
+    return { ok: true, existed: false, destDir };
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error);
     console.error(
       `${red('❌ Error installing')} ${magenta(skillName)}: ${message}`,
     );
-    return false;
+    return { ok: false, existed: false, destDir };
   }
 }
 
@@ -703,8 +720,27 @@ async function installSkill(
 export type TarballFetcher = (url: string) => Promise<Response>;
 
 export interface AddSkillOptions {
+  /** When true, write a `[skills.<name>]` entry to the config after install. */
+  track?: boolean;
   /** Injected fetcher for tests. Defaults to global `fetch`. */
   fetcher?: TarballFetcher;
+}
+
+/**
+ * Write or update the `[skills.<name>]` entry for a just-installed skill.
+ * Returns the path to the config file that was written.
+ */
+async function trackSkill(
+  installedName: string,
+  entry: SkillEntry,
+): Promise<string> {
+  const config = await loadConfig();
+  const skills = config.skills ?? {};
+  const existing = skills[installedName] ?? {};
+  skills[installedName] = { ...existing, ...entry };
+  config.skills = skills;
+  await saveConfig(config);
+  return getConfigPath();
 }
 
 async function addSkill(
@@ -733,6 +769,7 @@ async function addSkill(
 
   const [, user, repo, ref, subpathRaw] = match;
   const subpath = subpathRaw ? subpathRaw.replace(/^\//, '') : '';
+  const sourceUrl = `https://github.com/${user}/${repo}`;
 
   console.log(`Adding from ${magenta(`${user}/${repo}`)} @ ${magenta(ref)}...`);
 
@@ -795,23 +832,54 @@ async function addSkill(
       return false;
     }
 
+    const maybeTrack = async (
+      installedName: string,
+      entrySubpath: string,
+    ): Promise<void> => {
+      if (!options.track) return;
+      const entry: SkillEntry = {
+        source_url: sourceUrl,
+        subpath: entrySubpath,
+        ref,
+        synced_at: new Date().toISOString(),
+      };
+      const path = await trackSkill(installedName, entry);
+      console.log(
+        `${green('📌 Tracked')} ${magenta(installedName)} ${dim(italic(`(${sourceUrl})`))}`,
+      );
+      console.log(`   ${dim(italic('synced_at:'))} ${entry.synced_at}`);
+      console.log(`   ${dim(italic('config:'))} ${magenta(path)}`);
+    };
+
     // Single-skill: SKILL.md exists directly at targetDir
     if (await exists(join(targetDir, 'SKILL.md'))) {
       const skillName = subpath.split('/').filter(Boolean).pop() ?? repo;
-      const ok = await installSkill(
+      const outcome = await installSkill(
         targetDir,
         destPath,
         skillName,
         `${user}/${repo}`,
       );
-      if (ok) {
+
+      // Re-track: dir already exists AND skill is already tracked → refresh
+      // synced_at and succeed. Full re-sync is Phase 4.
+      if (!outcome.ok && outcome.existed && options.track) {
+        const existingConfig = await loadConfig();
+        if (existingConfig.skills?.[skillName]) {
+          await maybeTrack(skillName, subpath);
+          return true;
+        }
+      }
+
+      if (outcome.ok) {
+        await maybeTrack(skillName, subpath);
         console.log(`\n${dim(italic('Next steps:'))}`);
         console.log('1. Review SKILL.md to ensure it fits your setup');
         console.log(
           `2. Validate: ${dim(italic('rei validate'))} ${magenta(join(destPath, skillName))}`,
         );
       }
-      return ok;
+      return outcome.ok;
     }
 
     // Multi-skill: scan direct subdirectories for SKILL.md
@@ -840,13 +908,24 @@ async function addSkill(
 
     let successCount = 0;
     for (const skillName of skills) {
-      const ok = await installSkill(
+      const outcome = await installSkill(
         join(targetDir, skillName),
         destPath,
         skillName,
         `${user}/${repo}`,
       );
-      if (ok) successCount++;
+      const entrySubpath = subpath ? `${subpath}/${skillName}` : skillName;
+
+      if (outcome.ok) {
+        await maybeTrack(skillName, entrySubpath);
+        successCount++;
+      } else if (outcome.existed && options.track) {
+        const existingConfig = await loadConfig();
+        if (existingConfig.skills?.[skillName]) {
+          await maybeTrack(skillName, entrySubpath);
+          successCount++;
+        }
+      }
     }
 
     console.log(
@@ -1072,11 +1151,16 @@ cli
     'Add skill(s) from a GitHub tree URL — single skill or a whole skills directory',
   )
   .option(
-    '-p, --path <path:string>',
+    '--path <path:string>',
     'Destination directory for added skills',
     {
       default: SKILLS_DIR,
     },
+  )
+  .option(
+    '-t, --track',
+    'Record skill origin in the config for later syncing',
+    { default: false },
   )
   .example(
     'Add a single skill',
@@ -1086,8 +1170,14 @@ cli
     'Add all skills from a directory',
     'rei add https://github.com/user/repo/tree/main/skills',
   )
+  .example(
+    'Track a skill for later sync',
+    'rei add -t https://github.com/user/repo/tree/main/skills/my-skill',
+  )
   .action(async (options, githubUrl) => {
-    const success = await addSkill(githubUrl, options.path);
+    const success = await addSkill(githubUrl, options.path, {
+      track: options.track,
+    });
     Deno.exit(success ? 0 : 1);
   });
 

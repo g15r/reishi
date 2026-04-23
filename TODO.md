@@ -124,12 +124,12 @@ Per-skill overrides are stored in the `[skills.<name>]` table and documented in 
 
 When `rei add -t <url>` is used, reishi records metadata about the skill's origin so it can be synced later. Metadata is stored in the config file under `[skills.<name>]` tables.
 
-- [ ] Add `-t / --track` boolean flag to the `add` command
-- [ ] On tracked add: after successful install, write a `[skills.<name>]` entry to config with `source_url`, `synced_at` (ISO 8601), `ref` (branch/tag), and `prefix` (if used)
-- [ ] For multi-skill repos (e.g. readwise-skills), write one entry per skill, all sharing the same `source_url` but with individual `subpath` fields
-- [ ] Print tracking confirmation after install (source, sync time, config location)
-- [ ] Tests: tracked add writes correct config entries, multi-skill tracked add writes entries for each skill, untracked add does not write config entries
-- [ ] Tests: re-adding a tracked skill updates `synced_at` rather than duplicating the entry
+- [x] Add `-t / --track` boolean flag to the `add` command
+- [x] On tracked add: after successful install, write a `[skills.<name>]` entry to config with `source_url`, `synced_at` (ISO 8601), `ref` (branch/tag), and `prefix` (if used)
+- [x] For multi-skill repos (e.g. readwise-skills), write one entry per skill, all sharing the same `source_url` but with individual `subpath` fields
+- [x] Print tracking confirmation after install (source, sync time, config location)
+- [x] Tests: tracked add writes correct config entries, multi-skill tracked add writes entries for each skill, untracked add does not write config entries
+- [x] Tests: re-adding a tracked skill updates `synced_at` rather than duplicating the entry
 
 ### `--prefix` (`-p`) flag
 

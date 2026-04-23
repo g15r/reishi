@@ -39,7 +39,7 @@ rei validate my-skill
 | `refresh-docs` | Fetch latest Anthropic skill documentation |
 | `activate <skill-name>` | Move skill from deactivated to active (alias: `on`) |
 | `deactivate <skill-name>` | Move skill from active to deactivated (alias: `off`) |
-| `add <skill-name>` | Install a skill or directory of skills from GitHub (alias: `a`) |
+| `add <github-url>` | Install a skill or directory of skills from GitHub (alias: `a`, track with `-t`) |
 | `list <skill-name>` | List all active skills (alias: `ls`, include deactivated with `-a/--all`) |
 | `config <subcommand>` | Inspect and manage the reishi config (`init`, `show`, `path`, `edit`) |
 
@@ -88,6 +88,22 @@ Validates:
 - Name follows naming rules
 - No unexpected frontmatter keys
 - Description under 1024 chars, no angle brackets
+
+### add
+
+Install one or more skills from a GitHub tree URL:
+
+```bash
+# Single skill
+deno task cli add https://github.com/user/repo/tree/main/skills/my-skill
+
+# All skills from a directory
+deno task cli add https://github.com/user/repo/tree/main/skills
+```
+
+**Flags**:
+
+- `-t, --track`: Record the skill's origin (`source_url`, `ref`, `subpath`, `synced_at`) in `~/.config/reishi/config.toml` under `[skills.<name>]` so `rei sync` can refresh it later. Re-adding a tracked skill updates `synced_at` in place.
 
 ### refresh-docs
 

@@ -8,15 +8,22 @@
  */
 
 import { assert, assertEquals } from '@std/assert';
+import { parse as parseTOML } from '@std/toml';
 import { join } from '@std/path';
 import { exists } from '@std/fs';
 import { addSkill } from './reishi.ts';
+import type { ConfigSchema } from './config.ts';
 import {
   fakeFetchGithub,
   type IsolatedEnv,
   makeFixtureTarball,
   setupIsolatedEnv,
 } from './test-helpers.ts';
+
+async function readConfig(path: string): Promise<ConfigSchema> {
+  const text = await Deno.readTextFile(path);
+  return parseTOML(text) as unknown as ConfigSchema;
+}
 
 /** Pin env vars for the duration of fn; restore afterwards. */
 async function withEnv(
@@ -90,5 +97,83 @@ Deno.test('add installs all skills from a multi-skill fixture', async () => {
     assertEquals(ok, true);
     assert(await exists(join(env.sourceDir, 'book-review', 'SKILL.md')));
     assert(await exists(join(env.sourceDir, 'readwise-cli', 'SKILL.md')));
+  });
+});
+
+// ---------- Objective 2: --track flag ----------
+
+Deno.test('track: tracked add writes a [skills.<name>] entry', async () => {
+  await withFixture('single-skill-repo', {}, async ({ env, fetcher }) => {
+    const url = 'https://github.com/fakeuser/single-skill-repo/tree/main';
+    const ok = await addSkill(url, env.sourceDir, { fetcher, track: true });
+    assertEquals(ok, true);
+
+    const cfg = await readConfig(env.configPath);
+    assert(cfg.skills, 'skills table missing');
+    const entry = cfg.skills['single-skill-repo'];
+    assert(entry, 'skills.single-skill-repo missing');
+    assertEquals(entry.source_url, 'https://github.com/fakeuser/single-skill-repo');
+    assertEquals(entry.ref, 'main');
+    assertEquals(entry.subpath, '');
+    assert(entry.synced_at, 'synced_at missing');
+    assert(
+      !Number.isNaN(Date.parse(entry.synced_at!)),
+      `synced_at not ISO-parsable: ${entry.synced_at}`,
+    );
+  });
+});
+
+Deno.test('track: multi-skill tracked add writes one entry per skill', async () => {
+  await withFixture('multi-skill-repo', {}, async ({ env, fetcher }) => {
+    const url = 'https://github.com/fakeorg/multi-skill-repo/tree/main/skills';
+    const ok = await addSkill(url, env.sourceDir, { fetcher, track: true });
+    assertEquals(ok, true);
+
+    const cfg = await readConfig(env.configPath);
+    assert(cfg.skills, 'skills table missing');
+    const br = cfg.skills['book-review'];
+    const rc = cfg.skills['readwise-cli'];
+    assert(br && rc, 'expected both skills tracked');
+    assertEquals(br.source_url, 'https://github.com/fakeorg/multi-skill-repo');
+    assertEquals(rc.source_url, 'https://github.com/fakeorg/multi-skill-repo');
+    assertEquals(br.subpath, 'skills/book-review');
+    assertEquals(rc.subpath, 'skills/readwise-cli');
+  });
+});
+
+Deno.test('track: untracked add writes nothing to [skills]', async () => {
+  await withFixture('single-skill-repo', {}, async ({ env, fetcher }) => {
+    const url = 'https://github.com/fakeuser/single-skill-repo/tree/main';
+    const ok = await addSkill(url, env.sourceDir, { fetcher });
+    assertEquals(ok, true);
+
+    const cfg = await readConfig(env.configPath);
+    const skills = cfg.skills ?? {};
+    assertEquals(Object.keys(skills).length, 0);
+  });
+});
+
+Deno.test('track: re-adding a tracked skill updates synced_at', async () => {
+  await withFixture('single-skill-repo', {}, async ({ env, fetcher }) => {
+    const url = 'https://github.com/fakeuser/single-skill-repo/tree/main';
+    const ok1 = await addSkill(url, env.sourceDir, { fetcher, track: true });
+    assertEquals(ok1, true);
+    const cfg1 = await readConfig(env.configPath);
+    const first = cfg1.skills!['single-skill-repo'].synced_at!;
+
+    // Ensure clock ticks between runs so ISO strings differ.
+    await new Promise((resolve) => setTimeout(resolve, 20));
+
+    // Re-add with --track: dir exists + tracked → re-track path updates timestamp.
+    const ok2 = await addSkill(url, env.sourceDir, { fetcher, track: true });
+    assertEquals(ok2, true);
+    const cfg2 = await readConfig(env.configPath);
+    const second = cfg2.skills!['single-skill-repo'].synced_at!;
+    assert(
+      second > first,
+      `expected synced_at to increase: first=${first} second=${second}`,
+    );
+    // Still just one entry, not a duplicate.
+    assertEquals(Object.keys(cfg2.skills!).length, 1);
   });
 });
