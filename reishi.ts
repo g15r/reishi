@@ -28,6 +28,7 @@ import {
   saveConfig,
   type SkillEntry,
 } from './config.ts';
+import { getDeactivatedDir, getSourceDir } from './paths.ts';
 
 // ============================================================================
 // Configuration
@@ -36,8 +37,6 @@ import {
 const homeDir = Deno.env.get('HOME');
 if (!homeDir) throw new Error('HOME not set');
 
-// TODO: build `update` command with simple lock file for tracking like npx skills
-const SKILLS_DIR = join(homeDir, '.local/share/chezmoi/dot_agents/skills');
 // Resolve TEMPLATE_DIR relative to this script so it works both via `deno run`
 // from any CWD and in a compiled binary (where `assets/` is embedded via
 // `deno compile --include assets/`). `import.meta.dirname` points at the
@@ -45,8 +44,6 @@ const SKILLS_DIR = join(homeDir, '.local/share/chezmoi/dot_agents/skills');
 const TEMPLATE_DIR = import.meta.dirname
   ? join(import.meta.dirname, 'assets')
   : resolve('./assets');
-const SKILL_DEV_DIR = join(SKILLS_DIR, 'develop-agent-skills');
-const DEACTIVATED_SKILLS = join(SKILLS_DIR, '_deactivated');
 
 const TEMPLATES = {
   skill: 'SKILL.md.tmpl',
@@ -86,9 +83,10 @@ interface ValidationResult {
 
 /** List active skill directory names, excluding internal dirs (prefixed with _). */
 async function getActiveSkillNames(): Promise<string[]> {
+  const sourceDir = await getSourceDir();
   const names: string[] = [];
-  if (await exists(SKILLS_DIR)) {
-    for await (const entry of Deno.readDir(SKILLS_DIR)) {
+  if (await exists(sourceDir)) {
+    for await (const entry of Deno.readDir(sourceDir)) {
       if (entry.isDirectory && !entry.name.startsWith('_')) {
         names.push(entry.name);
       }
@@ -99,9 +97,10 @@ async function getActiveSkillNames(): Promise<string[]> {
 
 /** List deactivated skill directory names. */
 async function getDeactivatedSkillNames(): Promise<string[]> {
+  const deactivatedDir = await getDeactivatedDir();
   const names: string[] = [];
-  if (await exists(DEACTIVATED_SKILLS)) {
-    for await (const entry of Deno.readDir(DEACTIVATED_SKILLS)) {
+  if (await exists(deactivatedDir)) {
+    for await (const entry of Deno.readDir(deactivatedDir)) {
       if (entry.isDirectory) {
         names.push(entry.name);
       }
@@ -505,8 +504,13 @@ async function validateSkill(skillPath: string): Promise<ValidationResult> {
 async function refreshDocs(): Promise<boolean> {
   console.log('Fetching latest Anthropic skill documentation...\n');
 
+  const skillDevDir = join(await getSourceDir(), 'develop-agent-skills');
+
   try {
     let successCount = 0;
+
+    // Ensure the target dir exists before writing docs into it.
+    await Deno.mkdir(skillDevDir, { recursive: true });
 
     for (const source of DOC_SOURCES) {
       try {
@@ -521,7 +525,7 @@ async function refreshDocs(): Promise<boolean> {
         }
 
         const content = await response.text();
-        const outputPath = join(SKILL_DEV_DIR, source.filename);
+        const outputPath = join(skillDevDir, source.filename);
         await Deno.writeTextFile(outputPath, content);
         console.log(`  ${green('✅ Saved to')} ${magenta(outputPath)}`);
         successCount++;
@@ -535,7 +539,7 @@ async function refreshDocs(): Promise<boolean> {
 
     console.log(
       `\n${green('✅ Fetched')} ${successCount}/${DOC_SOURCES.length} documents to ${
-        magenta(SKILL_DEV_DIR)
+        magenta(skillDevDir)
       }`,
     );
     return successCount > 0;
@@ -551,8 +555,10 @@ async function refreshDocs(): Promise<boolean> {
 // ============================================================================
 
 async function activateSkill(skillName: string): Promise<boolean> {
-  const sourcePath = join(DEACTIVATED_SKILLS, skillName);
-  const destPath = join(SKILLS_DIR, skillName);
+  const sourceDir = await getSourceDir();
+  const deactivatedDir = await getDeactivatedDir();
+  const sourcePath = join(deactivatedDir, skillName);
+  const destPath = join(sourceDir, skillName);
 
   // Check source exists
   if (!(await exists(sourcePath))) {
@@ -593,8 +599,10 @@ async function activateSkill(skillName: string): Promise<boolean> {
 }
 
 async function deactivateSkill(skillName: string): Promise<boolean> {
-  const sourcePath = join(SKILLS_DIR, skillName);
-  const destPath = join(DEACTIVATED_SKILLS, skillName);
+  const sourceDir = await getSourceDir();
+  const deactivatedDir = await getDeactivatedDir();
+  const sourcePath = join(sourceDir, skillName);
+  const destPath = join(deactivatedDir, skillName);
 
   // Check source exists
   if (!(await exists(sourcePath))) {
@@ -613,8 +621,8 @@ async function deactivateSkill(skillName: string): Promise<boolean> {
   }
 
   // Create deactivated directory if needed
-  if (!(await exists(DEACTIVATED_SKILLS))) {
-    await Deno.mkdir(DEACTIVATED_SKILLS, { recursive: true });
+  if (!(await exists(deactivatedDir))) {
+    await Deno.mkdir(deactivatedDir, { recursive: true });
   }
 
   // Check destination doesn't exist
@@ -644,20 +652,23 @@ async function deactivateSkill(skillName: string): Promise<boolean> {
 // ============================================================================
 
 async function listSkills(all: boolean): Promise<boolean> {
+  const sourceDir = await getSourceDir();
+  const deactivatedDir = await getDeactivatedDir();
   const skills: { name: string; active: boolean }[] = [];
 
-  // Collect active skills
-  if (await exists(SKILLS_DIR)) {
-    for await (const entry of Deno.readDir(SKILLS_DIR)) {
-      if (entry.isDirectory) {
+  // Collect active skills — exclude the `_deactivated` subdir and any other
+  // reserved `_`-prefixed entries from the active listing.
+  if (await exists(sourceDir)) {
+    for await (const entry of Deno.readDir(sourceDir)) {
+      if (entry.isDirectory && !entry.name.startsWith('_')) {
         skills.push({ name: entry.name, active: true });
       }
     }
   }
 
   // Collect deactivated skills if --all
-  if (all && (await exists(DEACTIVATED_SKILLS))) {
-    for await (const entry of Deno.readDir(DEACTIVATED_SKILLS)) {
+  if (all && (await exists(deactivatedDir))) {
+    for await (const entry of Deno.readDir(deactivatedDir)) {
       if (entry.isDirectory) {
         skills.push({ name: entry.name, active: false });
       }
@@ -1102,6 +1113,10 @@ async function configEdit(): Promise<boolean> {
 // CLI Definition with Cliffy
 // ============================================================================
 
+// Show the raw config value (may be `~/...`) to avoid awaiting during CLI
+// setup. The actual resolved path is used at action-time.
+const { paths: { source: configuredSource } } = await loadConfig();
+
 const cli = new Command()
   .name('rei')
   .version('0.1.0')
@@ -1109,8 +1124,7 @@ const cli = new Command()
   .meta('Author', 'winnie [gwenwindflower@gh] + Claude Code')
   .meta('Docs', 'https://code.claude.com/docs/en/skills')
   .meta('Templates', TEMPLATE_DIR)
-  .meta('Active User Skills', SKILLS_DIR)
-  .meta('Deactivated User Skills', DEACTIVATED_SKILLS)
+  .meta('Source of Truth', configuredSource)
   .globalComplete('active-skill', () => getActiveSkillNames())
   .globalComplete('deactivated-skill', () => getDeactivatedSkillNames());
 
@@ -1119,9 +1133,7 @@ cli
   .command('init <skill-name:string>')
   .alias('new')
   .description('Initialize a new skill from template')
-  .option('-p, --path <path:string>', 'Base path for new skill', {
-    default: SKILLS_DIR,
-  })
+  .option('-p, --path <path:string>', 'Base path for new skill (defaults to config source)')
   .option(
     '-f, --fork <url:string>',
     'Use a GitHub repo as the skill basis (main branch HEAD)',
@@ -1136,9 +1148,10 @@ cli
     'rei init my-skill --fork https://github.com/user/repo',
   )
   .action(async (options, skillName) => {
+    const basePath = options.path ?? await getSourceDir();
     const success = options.fork
-      ? await forkSkill(skillName, options.path, options.fork)
-      : await initSkill(skillName, options.path);
+      ? await forkSkill(skillName, basePath, options.fork)
+      : await initSkill(skillName, basePath);
     Deno.exit(success ? 0 : 1);
   });
 
@@ -1208,10 +1221,7 @@ cli
   )
   .option(
     '--path <path:string>',
-    'Destination directory for added skills',
-    {
-      default: SKILLS_DIR,
-    },
+    'Destination directory for added skills (defaults to config source)',
   )
   .option(
     '-t, --track',
@@ -1241,7 +1251,8 @@ cli
     if (options.prefix === true) prefix = '';
     else if (typeof options.prefix === 'string') prefix = options.prefix;
 
-    const success = await addSkill(githubUrl, options.path, {
+    const destPath = options.path ?? await getSourceDir();
+    const success = await addSkill(githubUrl, destPath, {
       track: options.track,
       prefix,
     });

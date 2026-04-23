@@ -1,6 +1,6 @@
 # reishi Lightweight CLI Utility for Agent Skills
 
-CLI tool for managing cross-agent Skills. Skills live in `<chezmoi home>/dot_agents/skills/`, which chezmoi's symlinks out to `~/.agents/skills/` + any agent-specific locations (e.g. `~/.claude/skills/`).
+CLI tool for managing cross-agent Skills. Skills live in a single source-of-truth directory — configurable via `paths.source` in the reishi config (default `~/.config/reishi/skills/`) — and reishi syncs them to named targets (e.g. `~/.claude/skills/`) on each change.
 
 ## Quick Start
 
@@ -50,7 +50,7 @@ rei validate my-skill
 Create a new skill with proper structure:
 
 ```bash
-# Create in default location (~/.local/share/chezmoi/dot_agents/skills/)
+# Create in default location (config's paths.source, default ~/.config/reishi/skills/)
 deno task cli init my-awesome-skill
 
 # Create in custom location
@@ -150,8 +150,9 @@ deno task cli activate old-skill
 
 **Paths**:
 
-- Active: `~/.local/share/chezmoi/dot_agents/skills/`, applied by chezmoi to `~/.agents/skills/` + agent-specific paths
-- Deactivated: `~/.local/share/chezmoi/dot_agents/skills/_deactivated/`
+- Source of truth (active): `paths.source` from the reishi config — default `~/.config/reishi/skills/`
+- Deactivated: `<paths.source>/_deactivated/`
+- Targets: configured under `[paths.targets]`, synced from the source of truth on every change
 
 ## Testing
 

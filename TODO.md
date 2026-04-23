@@ -181,11 +181,11 @@ Build a fixture project that the full test suite can use across Phases 2-4. This
 
 Move the canonical skill storage from the current hardcoded chezmoi path to the configurable `paths.source` (default `~/.config/reishi/skills/`). All other locations become sync targets.
 
-- [ ] Update `SKILLS_DIR` resolution to read from config `paths.source` instead of hardcoded path
-- [ ] Update `DEACTIVATED_SKILLS` to live under the new source path
-- [ ] `rei config init` creates the source directory
-- [ ] Preserve backward compatibility: if config doesn't exist, fall back to current chezmoi path with a one-time migration prompt
-- [ ] Tests: commands use config-driven source path, fallback to legacy path works, migration prompt triggers correctly
+- [x] Update `SKILLS_DIR` resolution to read from config `paths.source` instead of hardcoded path (new `paths.ts` module with `getSourceDir()` / `getDeactivatedDir()` resolvers)
+- [x] Update `DEACTIVATED_SKILLS` to live under the new source path
+- [x] `rei config init` creates the source directory
+- [x] Tests: commands use config-driven source path via REISHI_CONFIG override
+- ~~Backward-compat one-time chezmoi migration prompt~~ — deferred. Low value without a migration tool; users with existing chezmoi setups can keep chezmoi as a target. Revisit if needed.
 
 ### Target sync engine
 
