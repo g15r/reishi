@@ -2,6 +2,21 @@
 
 ## Phase 7: Command Restructure, Sync/Pull Split, and Lockfile 🌀
 
+### Split `sync` and `pull`
+
+`sync` is now strictly local (source → targets). `pull` is the network operation (GitHub → source) that auto-syncs afterward. Upstream fetching was previously entangled with `syncSkill` and exposed via a `fetchUpstream: boolean` option; the new model has two separate entry points.
+
+- [x] Added `pullSkill(name, options)` and `pullAll(options)` in `sync.ts`; both compose prefix-change + fetch + auto-sync. Also added `PullOptions` (extends `SyncOptions` with an injectable `fetcher`) and `PullSkillResult` ({ fetch, sync }).
+- [x] Removed `fetchUpstream` (and `fetcher`) from `SyncOptions`; `syncSkill` no longer hits the network under any option
+- [x] Prefix-change detection moved to run *before* the fetch in `pullSkill`, so `parallel` mode actually populates the new-name dir instead of fetching into the stale old-name dir and leaving the new-name empty
+- [x] `rei skills pull [name]` — with no arg, pulls all tracked skills; with an arg, just that one
+- [x] `rei skills pull --dry-run` previews upstream diff (fetch side) without writing; auto-sync is skipped on dry-run
+- [x] Removed `--no-fetch` and `--force` from the top-level `rei sync`; `--prefix-change` also removed from top-level (pull is the right place for that)
+- [x] `rei skills updates --pull` replaced the old `rei updates --sync`; uses `pullSkill` directly
+- [x] Auto-sync triggers (`skills add`, `skills activate`, `skills new`, etc.) call `syncSkill(name)` with no options; `syncAndReport` no longer passes `fetchUpstream: false` (trivially true now)
+- [x] Added `printPullSummary()` helper in `reishi.ts` for the compound fetch+sync output
+- [x] Tests: fetch-related cases moved from `syncSkill` to `pullSkill` in `sync_fetch_test.ts` and `sync_prefix_test.ts`; the old `--no-fetch` test became a simpler "sync never hits network" invariant check; integration tests dropped `--no-fetch`
+
 ### Command restructure
 
 Moved skill commands under `rei skills`, renamed the skill scaffold from `init` to `new`, simplified rules and docs to match the filesystem-first design, and dropped `config edit`. Hard break — no top-level aliases for moved skill commands.

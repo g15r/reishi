@@ -42,22 +42,23 @@ export interface SyncOptions {
   method?: SyncMethod;
   /** Plan only — no writes. */
   dryRun?: boolean;
-  /**
-   * Re-fetch from upstream for tracked skills before redistributing. Defaults
-   * to `true` for the user-facing `rei sync` command and `false` for auto-sync
-   * triggers (`add`, `activate`).
-   */
-  fetchUpstream?: boolean;
   /** Bypass local-modification confirmation prompt. */
   force?: boolean;
   /** Pre-decide prefix-change behavior in non-interactive flows. */
   prefixChange?: 'rename' | 'parallel' | 'abort';
-  /** Injected fetcher for tests; defaults to global `fetch`. */
-  fetcher?: HttpFetcher;
   /** Injectable yes/no prompt for tests; defaults to terminal stdin. */
   promptYesNo?: PromptYesNo;
   /** Injectable choice prompt for tests; defaults to terminal stdin. */
   promptChoice?: PromptChoice;
+}
+
+/**
+ * Options for `pullSkill` / `pullAll`. Same surface as sync plus the network
+ * fetcher injection point for tests.
+ */
+export interface PullOptions extends SyncOptions {
+  /** Injected fetcher for tests; defaults to global `fetch`. */
+  fetcher?: HttpFetcher;
 }
 
 export type SyncAction = 'copied' | 'symlinked' | 'skipped' | 'failed';
@@ -111,28 +112,23 @@ export function resolveMethod(
 }
 
 /**
- * Sync a single skill to the appropriate targets. Returns one result per
- * target attempted.
+ * Sync a single skill to the appropriate targets — local-only, no network.
+ * Returns one result per target attempted.
  *
- * For tracked skills, re-fetches the upstream tarball, optionally prompts the
- * user about local modifications, and may detect a prefix change in the config
- * before any redistribution. Untracked skills skip straight to target sync.
+ * For tracked skills with an edited `prefix` in the lockfile, the source dir
+ * is renamed (or duplicated, based on `options.prefixChange`) before any
+ * redistribution. Upstream fetching lives in `pullSkill`.
  */
 export async function syncSkill(
   skillName: string,
   options: SyncOptions = {},
 ): Promise<SyncResult[]> {
-  const config = await loadConfig();
   const lockfile = await loadLockfile();
   const sourceDir = await getSourceDir();
   let activeSkillName = skillName;
   let skillSource = join(sourceDir, activeSkillName);
 
-  // Tracked skills can pull a renamed prefix or new upstream content. Both
-  // happen before we touch targets so the redistribution sees the new state.
   const initialLockEntry = lockfile.skills[activeSkillName];
-  const upstreamResults: SyncResult[] = [];
-
   if (initialLockEntry) {
     const renamed = await maybeApplyPrefixChange(activeSkillName, initialLockEntry, options);
     if (renamed.aborted) {
@@ -148,32 +144,10 @@ export async function syncSkill(
       activeSkillName = renamed.newName;
       skillSource = join(sourceDir, activeSkillName);
     }
-
-    const fetchUpstream = options.fetchUpstream ?? true;
-    if (fetchUpstream) {
-      const freshLock = await loadLockfile();
-      const entry = freshLock.skills[activeSkillName];
-      if (entry?.source_url) {
-        const fetched = await fetchUpstreamForSkill(
-          activeSkillName,
-          entry,
-          options,
-        );
-        if (fetched.aborted) {
-          return [{
-            skillName: activeSkillName,
-            target: '(none)',
-            targetPath: skillSource,
-            action: 'failed',
-            reason: fetched.reason ?? 'upstream fetch aborted',
-          }];
-        }
-      }
-    }
   }
 
   if (!(await exists(skillSource))) {
-    return [...upstreamResults, {
+    return [{
       skillName: activeSkillName,
       target: '(none)',
       targetPath: skillSource,
@@ -182,12 +156,9 @@ export async function syncSkill(
     }];
   }
 
-  // Reload config — fetch/rename may have rewritten the lockfile, though not
-  // the config. Re-read anyway so we pick up any outside edits.
   const refreshed = await loadConfig();
   const configEntry = refreshed.skills?.[activeSkillName];
   if (options.targets) {
-    // Validate filter names against config — reject typos early.
     const unknown = options.targets.filter((t) => !(t in refreshed.paths.targets));
     if (unknown.length > 0) {
       return [{
@@ -201,10 +172,10 @@ export async function syncSkill(
   }
 
   const targets = await resolveTargets(configEntry, options.targets, refreshed.paths.targets);
-  if (targets.length === 0) return upstreamResults;
+  if (targets.length === 0) return [];
 
   const method = resolveMethod(refreshed.sync_method, configEntry?.sync_method, options.method);
-  const results: SyncResult[] = [...upstreamResults];
+  const results: SyncResult[] = [];
 
   for (const target of targets) {
     const targetPath = join(target.path, activeSkillName);
@@ -441,6 +412,92 @@ export async function syncStatus(): Promise<SkillStatus[]> {
     }
   }
 
+  return results;
+}
+
+// ============================================================================
+// Pull — upstream fetch + auto-sync (composes fetch + sync)
+// ============================================================================
+
+export interface PullSkillResult {
+  skillName: string;
+  fetch: FetchUpstreamResult;
+  sync: SyncResult[];
+}
+
+/**
+ * Pull a tracked skill: apply any pending prefix change, fetch upstream, then
+ * auto-sync to targets. Untracked skills are no-ops (returned with
+ * `fetched: false`, no sync). On dry-run, the fetch previews the diff and
+ * the auto-sync step is skipped entirely.
+ *
+ * The prefix-change pass runs *before* the fetch so the download lands in the
+ * right directory (important for `parallel` mode, which otherwise would fetch
+ * into a stale old-name dir and leave the new-name dir empty).
+ */
+export async function pullSkill(
+  skillName: string,
+  options: PullOptions = {},
+): Promise<PullSkillResult> {
+  const lockfile = await loadLockfile();
+  const initialEntry = lockfile.skills[skillName];
+  if (!initialEntry) {
+    return {
+      skillName,
+      fetch: {
+        fetched: false,
+        changed: false,
+        diff: { added: [], modified: [], removed: [] },
+        aborted: true,
+        reason: `skill not tracked: ${skillName}`,
+      },
+      sync: [],
+    };
+  }
+
+  let activeName = skillName;
+  let activeEntry = initialEntry;
+  const renamed = await maybeApplyPrefixChange(skillName, initialEntry, options);
+  if (renamed.aborted) {
+    return {
+      skillName,
+      fetch: {
+        fetched: false,
+        changed: false,
+        diff: { added: [], modified: [], removed: [] },
+        aborted: true,
+        reason: renamed.reason ?? 'prefix change aborted',
+      },
+      sync: [],
+    };
+  }
+  if (renamed.newName) {
+    activeName = renamed.newName;
+    const freshLock = await loadLockfile();
+    const freshEntry = freshLock.skills[activeName];
+    if (freshEntry) activeEntry = freshEntry;
+  }
+
+  const fetchResult = await fetchUpstreamForSkill(activeName, activeEntry, options);
+  if (fetchResult.aborted || options.dryRun) {
+    return { skillName: activeName, fetch: fetchResult, sync: [] };
+  }
+
+  const syncResults = await syncSkill(activeName, options);
+  return { skillName: activeName, fetch: fetchResult, sync: syncResults };
+}
+
+/**
+ * Pull every tracked skill. Iterates the lockfile, pulling each in turn.
+ * Untracked skills (source dir present but no lockfile entry) are skipped.
+ */
+export async function pullAll(options: PullOptions = {}): Promise<PullSkillResult[]> {
+  const lockfile = await loadLockfile();
+  const names = Object.keys(lockfile.skills).sort();
+  const results: PullSkillResult[] = [];
+  for (const name of names) {
+    results.push(await pullSkill(name, options));
+  }
   return results;
 }
 
@@ -684,7 +741,7 @@ export function summarizeDiff(diff: FileDiff): string {
   return `${a} added, ${m} modified, ${r} removed`;
 }
 
-interface FetchUpstreamRunOptions extends SyncOptions {
+interface FetchUpstreamRunOptions extends PullOptions {
   /** Pre-fetched lock entry for symmetry with sync. Internal use. */
   lockOverride?: SkillLockEntry;
 }
@@ -692,7 +749,8 @@ interface FetchUpstreamRunOptions extends SyncOptions {
 /**
  * Public API: re-fetch a tracked skill from upstream and overwrite its source
  * dir. Honors `dryRun` (no writes), `force` (skip prompt), and `fetcher`
- * injection. Returns a structured result with the file-level diff.
+ * injection. Returns a structured result with the file-level diff. Does NOT
+ * sync to targets — callers compose fetch + sync via `pullSkill`.
  */
 export async function fetchUpstream(
   skillName: string,
@@ -714,12 +772,12 @@ export async function fetchUpstream(
 
 /**
  * Internal worker that actually performs the upstream fetch + overwrite. Kept
- * separate so syncSkill can reuse it without re-reading the lockfile.
+ * separate so `pullSkill` can reuse it without re-reading the lockfile.
  */
 async function fetchUpstreamForSkill(
   skillName: string,
   entry: SkillLockEntry,
-  options: SyncOptions,
+  options: PullOptions,
 ): Promise<FetchUpstreamResult> {
   const fetcher = options.fetcher ?? fetch;
   const sourceDir = await getSourceDir();

@@ -10,7 +10,7 @@ import { exists } from '@std/fs';
 import { parse as parseTOML, stringify as stringifyTOML } from '@std/toml';
 import type { LockfileSchema, SkillLockEntry } from './config.ts';
 import { resetPathCache } from './paths.ts';
-import { syncSkill } from './sync.ts';
+import { pullSkill, syncSkill } from './sync.ts';
 import {
   fakeFetchGithub,
   makeFixtureTarball,
@@ -97,7 +97,7 @@ Deno.test('prefix change (rename): renames source, target, and re-keys config', 
         oldMtime,
       );
 
-      const results = await syncSkill(oldName, {
+      const result = await pullSkill(oldName, {
         prefixChange: 'rename',
         fetcher: fakeFetchGithub(tarball),
       });
@@ -109,13 +109,13 @@ Deno.test('prefix change (rename): renames source, target, and re-keys config', 
       // Target dir renamed too.
       assert(await exists(join(claudeTarget, newName)));
       assert(!(await exists(join(claudeTarget, oldName))));
-      // Config re-keyed.
+      // Lockfile re-keyed.
       const cfg = await readLockfile(env.lockfilePath);
       assert(cfg.skills[newName]);
       assert(!cfg.skills[oldName]);
 
       // Final target-sync result is reported under the new name.
-      assert(results.some((r) => r.skillName === newName));
+      assert(result.sync.some((r) => r.skillName === newName));
     });
   } finally {
     try {
@@ -154,7 +154,7 @@ Deno.test('prefix change (parallel): creates new-named entry alongside old', asy
         oldMtime,
       );
 
-      await syncSkill(oldName, {
+      await pullSkill(oldName, {
         prefixChange: 'parallel',
         fetcher: fakeFetchGithub(tarball),
       });
@@ -237,7 +237,7 @@ Deno.test('prefix change (dry-run): previews rename without writing', async () =
         },
       });
 
-      await syncSkill(oldName, {
+      await pullSkill(oldName, {
         dryRun: true,
         prefixChange: 'rename',
         fetcher: fakeFetchGithub(tarball),
@@ -289,7 +289,7 @@ Deno.test('prefix change (prompt confirms rename): renames via injected prompt',
         oldMtime,
       );
 
-      const results = await syncSkill(oldName, {
+      const result = await pullSkill(oldName, {
         fetcher: fakeFetchGithub(tarball),
         promptYesNo: async () => true,
         promptChoice: async () => 'r', // rename
@@ -298,7 +298,7 @@ Deno.test('prefix change (prompt confirms rename): renames via injected prompt',
       const newName = 'readwise_book-review';
       assert(await exists(join(env.sourceDir, newName, 'SKILL.md')));
       assert(!(await exists(join(env.sourceDir, oldName))));
-      assert(results.some((r) => r.skillName === newName));
+      assert(result.sync.some((r) => r.skillName === newName));
     });
   } finally {
     try {
@@ -337,7 +337,7 @@ Deno.test('prefix change (prompt confirms parallel): installs alongside via inje
         oldMtime,
       );
 
-      await syncSkill(oldName, {
+      await pullSkill(oldName, {
         fetcher: fakeFetchGithub(tarball),
         promptYesNo: async () => true,
         promptChoice: async () => 'p', // parallel
@@ -418,12 +418,12 @@ Deno.test('prefix change (no change): no-op when prefix matches dir name', async
         oldMtime,
       );
 
-      const results = await syncSkill(name, {
+      const result = await pullSkill(name, {
         prefixChange: 'abort', // would fire if prefix was actually changing
         fetcher: fakeFetchGithub(tarball),
       });
       // No abort — straight to fetch + target sync.
-      assert(results.some((r) => r.action === 'copied' || r.action === 'symlinked'));
+      assert(result.sync.some((r) => r.action === 'copied' || r.action === 'symlinked'));
     });
   } finally {
     try {

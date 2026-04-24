@@ -38,6 +38,11 @@ import {
   maybeNotifyOfUpdates,
   printStatus,
   printSummary,
+  pullAll,
+  pullSkill,
+  type PullOptions,
+  type PullSkillResult,
+  summarizeDiff,
   syncAll,
   syncSkill,
   syncStatus,
@@ -185,9 +190,7 @@ async function syncAndReport(
 ): Promise<void> {
   try {
     const results = mode === 'sync'
-      // Auto-sync triggers (add/activate/init) should never pull upstream —
-      // that's reserved for the explicit `rei sync` command.
-      ? await syncSkill(skillName, { fetchUpstream: false })
+      ? await syncSkill(skillName)
       : await unsyncSkill(skillName);
     if (results.length === 0) return;
     const touched = results.filter((r) => r.action !== 'skipped' && r.action !== 'failed');
@@ -1310,12 +1313,10 @@ const skillsCommand = new Command()
     Deno.exit(success ? 0 : 1);
   })
   .command('sync [skill-name:string:active-skill]')
-  .description('Distribute skills from source to configured targets')
+  .description('Distribute skills from source to configured targets (local only)')
   .option('--targets <names:string>', 'Comma-separated target names to sync to')
   .option('--method <method:string>', 'Override sync method: copy or symlink')
   .option('--dry-run', 'Plan only — do not write')
-  .option('--no-fetch', 'Skip upstream fetch for tracked skills')
-  .option('--force', 'Overwrite local modifications without prompting')
   .option(
     '--prefix-change <mode:string>',
     'How to handle a changed prefix non-interactively: rename | parallel | abort',
@@ -1332,10 +1333,10 @@ const skillsCommand = new Command()
     Deno.exit(results.some((r) => r.action === 'failed') ? 1 : 0);
   })
   .command('pull [skill-name:string:active-skill]')
-  .description('Fetch upstream for tracked skills, then sync to targets')
+  .description('Fetch upstream for tracked skills, then auto-sync to targets')
   .option('--targets <names:string>', 'Comma-separated target names to sync to')
   .option('--method <method:string>', 'Override sync method: copy or symlink')
-  .option('--dry-run', 'Preview upstream + target changes without writing')
+  .option('--dry-run', 'Preview upstream diff without writing (no sync either)')
   .option('--force', 'Overwrite local modifications without prompting')
   .option(
     '--prefix-change <mode:string>',
@@ -1345,14 +1346,16 @@ const skillsCommand = new Command()
   .example('Pull one skill', 'rei skills pull book-review')
   .example('Preview upstream changes', 'rei skills pull --dry-run')
   .action(async (options, skillName) => {
-    const syncOpts = buildSyncOptions({ ...options, fetch: true });
-    if (syncOpts === null) Deno.exit(1);
-    syncOpts!.fetchUpstream = true;
+    const pullOpts = buildSyncOptions(options) as PullOptions | null;
+    if (pullOpts === null) Deno.exit(1);
     const results = skillName
-      ? await syncSkill(skillName, syncOpts!)
-      : await syncAll(syncOpts!);
-    printSummary(results);
-    Deno.exit(results.some((r) => r.action === 'failed') ? 1 : 0);
+      ? [await pullSkill(skillName, pullOpts!)]
+      : await pullAll(pullOpts!);
+    printPullSummary(results);
+    const anyFail = results.some((r) =>
+      r.fetch.aborted || r.sync.some((s) => s.action === 'failed')
+    );
+    Deno.exit(anyFail ? 1 : 0);
   })
   .command('status')
   .description('Report per skill × target freshness (local only, no network)')
@@ -1387,10 +1390,11 @@ const skillsCommand = new Command()
     }
 
     if (options.pull && updated.length > 0) {
+      const pullResults: PullSkillResult[] = [];
       for (const name of updated) {
-        const results = await syncSkill(name, { fetchUpstream: true });
-        printSummary(results);
+        pullResults.push(await pullSkill(name));
       }
+      printPullSummary(pullResults);
     }
 
     Deno.exit(0);
@@ -1399,15 +1403,15 @@ const skillsCommand = new Command()
 cli.command('skills', skillsCommand);
 
 /**
- * Parse the shared sync flag set (method/targets/dry-run/force/prefix-change)
- * used by both `skills sync` and the top-level cross-domain `sync`. Returns
- * null after printing an error message when a flag value is malformed.
+ * Parse the shared sync/pull flag set (method/targets/dry-run/force/
+ * prefix-change). Returns null after printing an error message when a flag
+ * value is malformed. Callers pass the same options object they get from
+ * Cliffy; unknown fields are ignored.
  */
 function buildSyncOptions(options: {
   targets?: string;
   method?: string;
   dryRun?: boolean;
-  fetch?: boolean;
   force?: boolean;
   prefixChange?: string;
 }): SyncOptions | null {
@@ -1442,10 +1446,32 @@ function buildSyncOptions(options: {
     targets,
     method,
     dryRun: options.dryRun,
-    fetchUpstream: options.fetch !== false,
     force: options.force,
     prefixChange,
   };
+}
+
+/** Compact summary for `rei skills pull` — fetch + sync per skill. */
+function printPullSummary(results: PullSkillResult[]): void {
+  if (results.length === 0) {
+    console.log('No tracked skills to pull.');
+    return;
+  }
+  for (const r of results) {
+    if (r.fetch.aborted) {
+      console.log(
+        `  ${red('✗')} ${magenta(r.skillName)} ${dim(italic(`(${r.fetch.reason ?? 'aborted'})`))}`,
+      );
+      continue;
+    }
+    const label = r.fetch.changed ? green('🌐 pulled') : dim(italic('up-to-date'));
+    const diff = r.fetch.changed ? ` ${dim(italic(`(${summarizeDiff(r.fetch.diff)})`))}` : '';
+    console.log(`  ${label} ${magenta(r.skillName)}${diff}`);
+  }
+  const syncFlat = results.flatMap((r) => r.sync);
+  if (syncFlat.length > 0) {
+    printSummary(syncFlat);
+  }
 }
 
 // Config command (with subcommands: init, show, path)
@@ -1479,16 +1505,13 @@ const configCommand = new Command()
 cli.command('config', configCommand);
 
 // Top-level sync — cross-domain convenience (skills + rules + docs).
-// Domain-specific syncs live under `rei skills sync`, `rei rules sync`,
-// `rei docs sync`.
+// Local-only: no network, no upstream fetch. Use `rei skills pull` to fetch.
 cli
   .command('sync')
-  .description('Sync skills, rules, and docs to targets in one operation')
+  .description('Sync skills, rules, and docs from source to targets (local only)')
   .option('--targets <names:string>', 'Comma-separated target names to sync to')
   .option('--method <method:string>', 'Override sync method: copy or symlink')
   .option('--dry-run', 'Plan only — do not write')
-  .option('--no-fetch', 'Skip the upstream fetch step for tracked skills')
-  .option('--force', 'Overwrite local modifications without prompting')
   .option(
     '--prefix-change <mode:string>',
     'How to handle a changed prefix non-interactively: rename | parallel | abort',

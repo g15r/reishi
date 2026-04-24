@@ -10,7 +10,7 @@ import { exists } from '@std/fs';
 import { parse as parseTOML, stringify as stringifyTOML } from '@std/toml';
 import type { LockfileSchema, SkillLockEntry } from './config.ts';
 import { resetPathCache } from './paths.ts';
-import { fetchUpstream, syncSkill } from './sync.ts';
+import { fetchUpstream, pullSkill, syncSkill } from './sync.ts';
 import {
   fakeFetchGithub,
   makeFixtureTarball,
@@ -63,7 +63,7 @@ async function seedSkill(sourceDir: string, name: string): Promise<string> {
   return dir;
 }
 
-Deno.test('sync (tracked): pulls upstream, overwrites source, updates synced_at', async () => {
+Deno.test('pull (tracked): pulls upstream, overwrites source, updates synced_at', async () => {
   const env = await setupIsolatedEnv();
   const tarball = await makeFixtureTarball('single-skill-repo');
   try {
@@ -100,7 +100,7 @@ Deno.test('sync (tracked): pulls upstream, overwrites source, updates synced_at'
       const before = (await readLockfile(env.lockfilePath)).skills['single-skill-repo'].synced_at!;
       await new Promise((r) => setTimeout(r, 20));
 
-      const results = await syncSkill('single-skill-repo', {
+      const result = await pullSkill('single-skill-repo', {
         fetcher: fakeFetchGithub(tarball),
       });
 
@@ -114,10 +114,10 @@ Deno.test('sync (tracked): pulls upstream, overwrites source, updates synced_at'
       const after = (await readLockfile(env.lockfilePath)).skills['single-skill-repo'].synced_at!;
       assert(after > before, `expected synced_at to advance: before=${before} after=${after}`);
 
-      // And target sync ran.
+      // And auto-sync ran to the target.
       const targetCopy = join(env.home, '.claude', 'skills', 'single-skill-repo', 'SKILL.md');
       assert(await exists(targetCopy), 'target was not synced');
-      assert(results.some((r) => r.action === 'copied' || r.action === 'symlinked'));
+      assert(result.sync.some((r) => r.action === 'copied' || r.action === 'symlinked'));
     });
   } finally {
     try {
@@ -148,9 +148,8 @@ Deno.test('sync (untracked): no upstream fetch, only target sync', async () => {
   }
 });
 
-Deno.test('sync (--no-fetch): skips upstream pull even for tracked skills', async () => {
+Deno.test('sync on a tracked skill never hits the network', async () => {
   const env = await setupIsolatedEnv();
-  const tarball = await makeFixtureTarball('single-skill-repo');
   try {
     await withEnv(env.env, async () => {
       await seedSkill(env.sourceDir, 'single-skill-repo');
@@ -166,33 +165,24 @@ Deno.test('sync (--no-fetch): skips upstream pull even for tracked skills', asyn
         },
       });
 
-      // Pass a fetcher that throws if invoked — proves we never called it.
-      const failingFetcher = () => {
-        throw new Error('fetcher should not have been called');
-      };
-      const results = await syncSkill('single-skill-repo', {
-        fetchUpstream: false,
-        fetcher: failingFetcher as unknown as typeof fetch,
-      });
+      // syncSkill no longer accepts a fetcher; if it tried to hit the real
+      // network under test perms we'd see a NetworkError or PermissionDenied.
+      const results = await syncSkill('single-skill-repo');
 
-      // Source SKILL.md still says "stale" — fetch was suppressed.
+      // Source SKILL.md is unchanged — no fetch happened.
       const src = await Deno.readTextFile(
         join(env.sourceDir, 'single-skill-repo', 'SKILL.md'),
       );
       assert(src.includes('description: stale'));
-
       // But target sync still ran.
       assert(results.some((r) => r.action === 'copied'));
     });
   } finally {
-    try {
-      await Deno.remove(tarball);
-    } catch { /* ignore */ }
     await env.cleanup();
   }
 });
 
-Deno.test('sync (--dry-run): no source write, no synced_at advance', async () => {
+Deno.test('pull (--dry-run): no source write, no synced_at advance', async () => {
   const env = await setupIsolatedEnv();
   const tarball = await makeFixtureTarball('single-skill-repo');
   try {
@@ -211,7 +201,7 @@ Deno.test('sync (--dry-run): no source write, no synced_at advance', async () =>
         },
       });
 
-      await syncSkill('single-skill-repo', {
+      await pullSkill('single-skill-repo', {
         dryRun: true,
         fetcher: fakeFetchGithub(tarball),
       });
@@ -253,12 +243,15 @@ Deno.test('sync (local mods, no force): aborts with informative reason', async (
 
       // Inject a declining prompt to avoid hanging when stdin is a terminal
       // (e.g. running `deno task test` from an interactive shell).
-      const results = await syncSkill('single-skill-repo', {
+      const result = await pullSkill('single-skill-repo', {
         fetcher: fakeFetchGithub(tarball),
         promptYesNo: async () => false,
       });
-      // Declined => failed result with the local-mod reason.
-      assert(results.some((r) => r.action === 'failed' && (r.reason ?? '').includes('declined')));
+      // Declined => fetch aborted with the local-mod reason.
+      assert(
+        result.fetch.aborted && (result.fetch.reason ?? '').includes('declined'),
+        `expected declined-abort reason, got: ${result.fetch.reason}`,
+      );
       // Source untouched — still has the old "stale" description.
       const src = await Deno.readTextFile(
         join(env.sourceDir, 'single-skill-repo', 'SKILL.md'),
@@ -291,7 +284,7 @@ Deno.test('sync (local mods, --force): proceeds and overwrites source', async ()
       });
       await Deno.mkdir(join(env.home, '.claude', 'skills'), { recursive: true });
 
-      await syncSkill('single-skill-repo', {
+      await pullSkill('single-skill-repo', {
         force: true,
         fetcher: fakeFetchGithub(tarball),
       });
@@ -337,7 +330,7 @@ Deno.test('sync (multi-skill repo): only the requested skill is synced from the 
         },
       });
 
-      await syncSkill('book-review', { fetcher: fakeFetchGithub(tarball) });
+      await pullSkill('book-review', { fetcher: fakeFetchGithub(tarball) });
 
       // book-review SKILL.md was overwritten with the fixture content.
       const br = await Deno.readTextFile(join(env.sourceDir, 'book-review', 'SKILL.md'));
@@ -372,7 +365,7 @@ Deno.test('sync (local mods, prompt accepts): proceeds like --force', async () =
       });
       await Deno.mkdir(join(env.home, '.claude', 'skills'), { recursive: true });
 
-      const results = await syncSkill('single-skill-repo', {
+      const result = await pullSkill('single-skill-repo', {
         fetcher: fakeFetchGithub(tarball),
         promptYesNo: async () => true,
       });
@@ -381,7 +374,7 @@ Deno.test('sync (local mods, prompt accepts): proceeds like --force', async () =
         join(env.sourceDir, 'single-skill-repo', 'SKILL.md'),
       );
       assert(src.includes('A test fixture skill'), 'source should contain upstream content');
-      assert(results.some((r) => r.action === 'copied' || r.action === 'symlinked'));
+      assert(result.sync.some((r) => r.action === 'copied' || r.action === 'symlinked'));
     });
   } finally {
     try {
@@ -408,12 +401,15 @@ Deno.test('sync (local mods, prompt declines): aborts with declined reason', asy
         },
       });
 
-      const results = await syncSkill('single-skill-repo', {
+      const result = await pullSkill('single-skill-repo', {
         fetcher: fakeFetchGithub(tarball),
         promptYesNo: async () => false,
       });
-      // Prompt declined → abort with "declined" wording (not the non-interactive hint).
-      assert(results.some((r) => r.action === 'failed' && (r.reason ?? '').includes('declined')));
+      // Prompt declined → fetch aborted with "declined" wording.
+      assert(
+        result.fetch.aborted && (result.fetch.reason ?? '').includes('declined'),
+        `expected declined-abort reason, got: ${result.fetch.reason}`,
+      );
       // Source untouched.
       const src = await Deno.readTextFile(
         join(env.sourceDir, 'single-skill-repo', 'SKILL.md'),

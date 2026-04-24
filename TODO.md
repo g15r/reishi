@@ -6,20 +6,6 @@ Overhaul of the first-pass v1 work: introduce a lockfile to separate config from
 
 The objectives below are mostly sequential — later work reads state written by earlier work, so treat this as a single-agent pass rather than a parallelizable phase. Conceptual model lives in `AGENTS.md`; implementation needs to catch up to it.
 
-### Split `sync` and `pull`
-
-`sync` is local-only (source → targets). `pull` is the network operation (GitHub → source), then auto-syncs to targets.
-
-- [ ] Extract upstream fetch logic from `syncSkill` into a public `pullSkill` function (the work in `fetchUpstreamForSkill` moves into this)
-- [ ] `rei skills pull [skill-name]` — with no arg, pulls all tracked skills; with an arg, just that one
-- [ ] `rei skills pull --dry-run` previews upstream changes and the subsequent sync without writing — this is how users preview "what would update"
-- [ ] Remove upstream-fetch path from `rei sync` entirely
-- [ ] Remove `--no-fetch` and `--force` flags from `sync` (no longer applicable)
-- [ ] `rei skills updates --pull` replaces the old `rei updates --sync`
-- [ ] Auto-sync triggers (`skills add`, `skills activate`, `skills deactivate`, `skills new`) remain sync-only — never pull
-- [ ] `pull` auto-syncs to targets after a successful fetch
-- [ ] Tests: pull fetches then syncs, sync never hits network, auto-sync triggers don't pull, `pull --dry-run` writes nothing
-
 ### SHA-based upstream freshness
 
 Replace mtime-based upstream staleness with SHA comparison against GitHub.
