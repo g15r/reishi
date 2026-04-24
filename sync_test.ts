@@ -301,11 +301,20 @@ Deno.test('--targets validates against known names', async () => {
 });
 
 // ── Status tests ────────────────────────────────────────────────────────────
-// Status is anchored on synced_at from the config:
-//   stale    = source mtime > synced_at  (upstream moved)
-//   diverged = target mtime > synced_at  (user edited locally)
+// Status is local-only (no network). New semantics:
+//   stale    = sourceMtime > targetMtime  (target out of date vs source)
+//   diverged = sourceMtime > synced_at    (user edited source since last pull)
 
-Deno.test('status fresh: synced_at is current, no edits on either side', async () => {
+async function backdateTree(root: string, when: Date): Promise<void> {
+  for await (const entry of Deno.readDir(root)) {
+    const full = join(root, entry.name);
+    if (entry.isDirectory) await backdateTree(full, when);
+    await Deno.utime(full, when, when);
+  }
+  await Deno.utime(root, when, when);
+}
+
+Deno.test('status fresh: target matches source, no local edits', async () => {
   const env = await setupIsolatedEnv();
   try {
     await withEnv(env.env, async () => {
@@ -313,20 +322,10 @@ Deno.test('status fresh: synced_at is current, no edits on either side', async (
       await Deno.mkdir(join(env.home, '.claude', 'skills'), { recursive: true });
       await syncSkill('alpha');
 
-      // Back-date source and target to before synced_at.
+      // Both sides at the same old mtime; synced_at is after that.
       const past = new Date(Date.now() - 120_000);
-      const backdateTree = async (p: string): Promise<void> => {
-        for await (const entry of Deno.readDir(p)) {
-          const full = join(p, entry.name);
-          if (entry.isDirectory) await backdateTree(full);
-          await Deno.utime(full, past, past);
-        }
-        await Deno.utime(p, past, past);
-      };
-      await backdateTree(join(env.sourceDir, 'alpha'));
-      await backdateTree(join(env.home, '.claude', 'skills', 'alpha'));
-
-      // synced_at is "now" — both sides are older → fresh, not diverged.
+      await backdateTree(join(env.sourceDir, 'alpha'), past);
+      await backdateTree(join(env.home, '.claude', 'skills', 'alpha'), past);
       await writeLockfile(env.lockfilePath, {
         alpha: { synced_at: new Date().toISOString() },
       });
@@ -342,7 +341,7 @@ Deno.test('status fresh: synced_at is current, no edits on either side', async (
   }
 });
 
-Deno.test('status stale: source updated after synced_at, target untouched', async () => {
+Deno.test('status stale: source newer than target (needs sync)', async () => {
   const env = await setupIsolatedEnv();
   try {
     await withEnv(env.env, async () => {
@@ -350,31 +349,21 @@ Deno.test('status stale: source updated after synced_at, target untouched', asyn
       await Deno.mkdir(join(env.home, '.claude', 'skills'), { recursive: true });
       await syncSkill('alpha');
 
-      // Set synced_at to the past.
-      const syncedAt = new Date(Date.now() - 60_000);
-      await writeLockfile(env.lockfilePath, {
-        alpha: { synced_at: syncedAt.toISOString() },
-      });
+      // Back-date the target to well before source; lockfile synced_at matches.
+      const oldTarget = new Date(Date.now() - 120_000);
+      await backdateTree(join(env.home, '.claude', 'skills', 'alpha'), oldTarget);
 
-      // Back-date target to before synced_at (no local edits).
-      const oldTarget = new Date(syncedAt.getTime() - 60_000);
-      const backdateTree = async (p: string): Promise<void> => {
-        for await (const entry of Deno.readDir(p)) {
-          const full = join(p, entry.name);
-          if (entry.isDirectory) await backdateTree(full);
-          await Deno.utime(full, oldTarget, oldTarget);
-        }
-        await Deno.utime(p, oldTarget, oldTarget);
-      };
-      await backdateTree(join(env.home, '.claude', 'skills', 'alpha'));
-
-      // Bump source to after synced_at (upstream moved).
+      // Bump source to "now" — but leave synced_at in the future so the source
+      // is NOT diverged (no local edits since last pull).
       const future = new Date();
       await Deno.writeTextFile(
         join(env.sourceDir, 'alpha', 'SKILL.md'),
         '---\nname: alpha\ndescription: updated upstream\n---\n',
       );
       await Deno.utime(join(env.sourceDir, 'alpha', 'SKILL.md'), future, future);
+      await writeLockfile(env.lockfilePath, {
+        alpha: { synced_at: new Date(future.getTime() + 60_000).toISOString() },
+      });
 
       const statuses = await syncStatus();
       const alpha = statuses.find((s) => s.skillName === 'alpha' && s.target === 'claude');
@@ -387,7 +376,7 @@ Deno.test('status stale: source updated after synced_at, target untouched', asyn
   }
 });
 
-Deno.test('status diverged: target modified after synced_at, source untouched', async () => {
+Deno.test('status diverged: source edited since last pull', async () => {
   const env = await setupIsolatedEnv();
   try {
     await withEnv(env.env, async () => {
@@ -395,48 +384,34 @@ Deno.test('status diverged: target modified after synced_at, source untouched', 
       await Deno.mkdir(join(env.home, '.claude', 'skills'), { recursive: true });
       await syncSkill('alpha');
 
-      // Set synced_at to the past.
+      // synced_at in the past — any post-synced_at source edit counts as diverged.
       const syncedAt = new Date(Date.now() - 60_000);
       await writeLockfile(env.lockfilePath, {
         alpha: { synced_at: syncedAt.toISOString() },
       });
 
-      // Back-date source to before synced_at (no upstream changes).
-      const oldSource = new Date(syncedAt.getTime() - 60_000);
-      const backdateTree = async (p: string): Promise<void> => {
-        for await (const entry of Deno.readDir(p)) {
-          const full = join(p, entry.name);
-          if (entry.isDirectory) await backdateTree(full);
-          await Deno.utime(full, oldSource, oldSource);
-        }
-        await Deno.utime(p, oldSource, oldSource);
-      };
-      await backdateTree(join(env.sourceDir, 'alpha'));
-
-      // Bump target to after synced_at (user edited locally).
+      // Edit the source after synced_at, then re-sync to the target so it's
+      // NOT stale (target mirrors source).
       const future = new Date();
       await Deno.writeTextFile(
-        join(env.home, '.claude', 'skills', 'alpha', 'SKILL.md'),
-        '---\nname: alpha\ndescription: user tweaked\n---\n',
+        join(env.sourceDir, 'alpha', 'SKILL.md'),
+        '---\nname: alpha\ndescription: user tweak\n---\n',
       );
-      await Deno.utime(
-        join(env.home, '.claude', 'skills', 'alpha', 'SKILL.md'),
-        future,
-        future,
-      );
+      await Deno.utime(join(env.sourceDir, 'alpha', 'SKILL.md'), future, future);
+      await syncSkill('alpha');
+      // `synced_at` stays as we wrote it — the sync above only updates targets.
 
       const statuses = await syncStatus();
       const alpha = statuses.find((s) => s.skillName === 'alpha' && s.target === 'claude');
       assert(alpha?.present);
-      assertEquals(alpha?.stale, false);
-      assertEquals(alpha?.diverged, true);
+      assertEquals(alpha?.diverged, true, 'source edited after synced_at → diverged');
     });
   } finally {
     await env.cleanup();
   }
 });
 
-Deno.test('status stale + diverged: both source and target newer than synced_at', async () => {
+Deno.test('status stale + diverged: source edited and not re-synced to target', async () => {
   const env = await setupIsolatedEnv();
   try {
     await withEnv(env.env, async () => {
@@ -444,29 +419,20 @@ Deno.test('status stale + diverged: both source and target newer than synced_at'
       await Deno.mkdir(join(env.home, '.claude', 'skills'), { recursive: true });
       await syncSkill('alpha');
 
-      // synced_at well in the past.
+      // Lock synced_at in the past; target at that old time.
       const syncedAt = new Date(Date.now() - 120_000);
       await writeLockfile(env.lockfilePath, {
         alpha: { synced_at: syncedAt.toISOString() },
       });
+      await backdateTree(join(env.home, '.claude', 'skills', 'alpha'), syncedAt);
 
-      // Both source and target are newer than synced_at.
+      // Source edited after synced_at, but target not re-synced.
       const future = new Date();
       await Deno.writeTextFile(
         join(env.sourceDir, 'alpha', 'SKILL.md'),
-        '---\nname: alpha\ndescription: upstream update\n---\n',
-      );
-      await Deno.utime(join(env.sourceDir, 'alpha', 'SKILL.md'), future, future);
-
-      await Deno.writeTextFile(
-        join(env.home, '.claude', 'skills', 'alpha', 'SKILL.md'),
         '---\nname: alpha\ndescription: user edit\n---\n',
       );
-      await Deno.utime(
-        join(env.home, '.claude', 'skills', 'alpha', 'SKILL.md'),
-        future,
-        future,
-      );
+      await Deno.utime(join(env.sourceDir, 'alpha', 'SKILL.md'), future, future);
 
       const statuses = await syncStatus();
       const alpha = statuses.find((s) => s.skillName === 'alpha' && s.target === 'claude');

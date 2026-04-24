@@ -335,23 +335,26 @@ export interface SkillStatus {
   target: string;
   targetPath: string;
   present: boolean;
-  /** Source has content newer than the last sync (upstream moved). */
+  /** Source is newer than target — a sync would update the target. */
   stale: boolean;
-  /** Target has files modified after the last sync (user made local edits). */
+  /** Source has local edits since the last pull (lockfile `synced_at`). */
   diverged: boolean;
   isSymlink: boolean;
 }
 
 /**
- * For each active skill × configured target, report presence, staleness, and
- * divergence — all anchored on the `synced_at` timestamp in the config.
+ * For each active skill × configured target, report presence and freshness —
+ * purely local, no network. Upstream-comparison (is there a new commit?) lives
+ * in `rei skills pull --dry-run` and `rei skills updates`, not here.
  *
- * - **stale**: the source has files newer than `synced_at` → upstream moved.
- * - **diverged**: the target has files newer than `synced_at` → user edited.
- * - Both can be true simultaneously (upstream moved AND user edited).
- * - Symlinks are never stale or diverged — they always point at the source.
- * - Untracked skills (no config entry / no `synced_at`) are never stale; they
- *   can still be diverged if the target has been modified after the source.
+ * - **stale**: `sourceMtime > targetMtime` → target needs a sync.
+ * - **diverged**: `sourceMtime > synced_at` (lockfile) → user has edited the
+ *   source dir since the last pull. Informational — divergence protection
+ *   handles it automatically on the next pull.
+ * - Symlinks are never stale (they *are* the source) and never diverged
+ *   (divergence is about the source, and a symlink target can't be out of
+ *   sync with its own source).
+ * - Untracked skills (no lockfile entry / no `synced_at`) are never diverged.
  */
 export async function syncStatus(): Promise<SkillStatus[]> {
   const config = await loadConfig();
@@ -374,6 +377,8 @@ export async function syncStatus(): Promise<SkillStatus[]> {
     const configEntry = config.skills?.[name];
     const lockEntry = lockfile.skills[name];
     const syncedAt = lockEntry?.synced_at ? Date.parse(lockEntry.synced_at) : 0;
+    const sourceMtime = await newestFileMtime(skillSource);
+    const diverged = syncedAt > 0 && sourceMtime > syncedAt;
     const targets = await resolveTargets(configEntry, undefined, config.paths.targets);
 
     for (const target of targets) {
@@ -389,13 +394,9 @@ export async function syncStatus(): Promise<SkillStatus[]> {
       }
 
       let stale = false;
-      let diverged = false;
-
-      if (present && !isSymlink && syncedAt > 0) {
-        const sourceMtime = await newestFileMtime(skillSource);
+      if (present && !isSymlink) {
         const targetMtime = await newestFileMtime(targetPath);
-        stale = sourceMtime > syncedAt;
-        diverged = targetMtime > syncedAt;
+        stale = sourceMtime > targetMtime;
       }
 
       results.push({
@@ -404,7 +405,7 @@ export async function syncStatus(): Promise<SkillStatus[]> {
         targetPath,
         present,
         stale,
-        diverged,
+        diverged: isSymlink ? false : diverged,
         isSymlink,
       });
     }

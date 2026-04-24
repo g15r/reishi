@@ -2,6 +2,17 @@
 
 ## Phase 7: Command Restructure, Sync/Pull Split, and Lockfile 🌀
 
+### Simplify status
+
+`rei skills status` stays purely local — no network, no SHA comparisons. The mental model shifted: `stale` now means the target is out of date relative to the source (not "upstream moved"), and `diverged` means the user edited the source since the last pull. Upstream-change reporting lives in `rei skills pull --dry-run` and `rei skills updates`.
+
+- [x] `syncStatus` re-written: `stale = sourceMtime > targetMtime`, `diverged = sourceMtime > synced_at`; still no network calls
+- [x] Symlinks always report `stale: false` and `diverged: false` (they *are* the source)
+- [x] Untracked skills (no lockfile entry / no `synced_at`) are never diverged
+- [x] Doc comments on `SkillStatus` and `syncStatus` rewritten to describe the new semantics
+- [x] Status tests in `sync_test.ts` rewritten for the new mental model: `status fresh`, `status stale: source newer than target`, `status diverged: source edited since last pull`, `status stale + diverged`; the old "target edited directly" scenario is gone — targets are output in this model
+- [x] Factored out a shared `backdateTree(root, when)` helper inside `sync_test.ts` to DRY up the mtime-manipulation setup across status tests
+
 ### Divergence protection
 
 Replaced the prompt-driven local-modification check with an automatic per-file merge. Pull is now always safe: locally-edited files are preserved in place, and the upstream version is saved under a `_N` suffix so the user can diff and resolve at their leisure.
