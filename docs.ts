@@ -19,7 +19,7 @@
  */
 
 import { parse as parseYAML } from '@std/yaml';
-import { basename, dirname, extname, join, relative, resolve } from '@std/path';
+import { dirname, extname, join, relative, resolve } from '@std/path';
 import { copy, exists } from '@std/fs';
 import { dim, green, italic, magenta, red, yellow } from '@std/fmt/colors';
 import {
@@ -30,7 +30,7 @@ import {
   type SyncMethod,
 } from './config.ts';
 import { getDocsSourceDir } from './paths.ts';
-import { type HttpFetcher, resolveMethod } from './sync.ts';
+import { resolveMethod } from './sync.ts';
 
 // ============================================================================
 // Types
@@ -40,11 +40,6 @@ export interface FragmentEntry {
   name: string;
   path: string;
   size: number;
-}
-
-export interface AddFragmentOptions {
-  force?: boolean;
-  fetcher?: HttpFetcher;
 }
 
 export type DocsSyncAction = 'copied' | 'symlinked' | 'skipped' | 'failed';
@@ -214,172 +209,9 @@ export async function getFragmentNames(project: string): Promise<string[]> {
   return fragments.map((f) => f.name);
 }
 
-// ============================================================================
-// Add
-// ============================================================================
-
-/**
- * Add a fragment to a project. `input` may be a local path or an http(s) URL.
- * GitHub tree URLs are supported via tarball extract (mirrors addRule).
- *
- * Returns the absolute destination path.
- */
-export async function addFragment(
-  project: string,
-  input: string,
-  options: AddFragmentOptions = {},
-): Promise<string> {
-  const projectDir = join(await getDocsSourceDir(), project);
-  await Deno.mkdir(projectDir, { recursive: true });
-
-  if (input.startsWith('https://github.com/') && /\/tree\//.test(input)) {
-    return await addFragmentFromGithubTree(input, projectDir, options);
-  }
-  if (input.startsWith('http://') || input.startsWith('https://')) {
-    return await addFragmentFromUrl(input, projectDir, options);
-  }
-  return await addFragmentFromLocal(input, projectDir, options);
-}
-
-async function refuseOverwrite(dest: string, force: boolean): Promise<void> {
-  if (force) return;
-  if (await exists(dest)) {
-    throw new Error(`fragment already exists at ${dest} (use --force to overwrite)`);
-  }
-}
-
-async function addFragmentFromLocal(
-  input: string,
-  projectDir: string,
-  options: AddFragmentOptions,
-): Promise<string> {
-  const src = resolve(input);
-  const info = await Deno.stat(src);
-  if (!info.isFile) {
-    throw new Error(`fragment source must be a file (got dir): ${src}`);
-  }
-  const name = basename(src);
-  const filename = name.endsWith('.md') ? name : `${name}.md`;
-  const dest = join(projectDir, filename);
-  await refuseOverwrite(dest, options.force ?? false);
-  await Deno.copyFile(src, dest);
-  return dest;
-}
-
-async function addFragmentFromUrl(
-  url: string,
-  projectDir: string,
-  options: AddFragmentOptions,
-): Promise<string> {
-  const fetcher = options.fetcher ?? fetch;
-  const response = await fetcher(url);
-  if (!response.ok) {
-    throw new Error(`failed to fetch fragment (HTTP ${response.status}): ${url}`);
-  }
-  const parsed = new URL(url);
-  const last = parsed.pathname.split('/').filter(Boolean).pop() ?? 'fragment';
-  const ext = extname(last);
-  const filename = ext === '.md' ? last : `${last.replace(/\.[^.]+$/, '') || 'fragment'}.md`;
-  const dest = join(projectDir, filename);
-  await refuseOverwrite(dest, options.force ?? false);
-  const body = await response.text();
-  await Deno.writeTextFile(dest, body);
-  return dest;
-}
-
-async function addFragmentFromGithubTree(
-  url: string,
-  projectDir: string,
-  options: AddFragmentOptions,
-): Promise<string> {
-  // https://github.com/user/repo/tree/ref[/subpath]
-  const match = url.match(
-    /^https:\/\/github\.com\/([^/]+)\/([^/]+)\/tree\/([^/]+)(\/.*)?$/,
-  );
-  if (!match) {
-    throw new Error(`invalid GitHub tree URL: ${url}`);
-  }
-  const [, user, repo, ref, subpathRaw] = match;
-  const subpath = subpathRaw ? subpathRaw.replace(/^\//, '') : '';
-  const fetcher = options.fetcher ?? fetch;
-
-  const candidates = [
-    `https://github.com/${user}/${repo}/archive/refs/heads/${ref}.tar.gz`,
-    `https://github.com/${user}/${repo}/archive/refs/tags/${ref}.tar.gz`,
-  ];
-  let response: Response | undefined;
-  for (const candidate of candidates) {
-    response = await fetcher(candidate);
-    if (response.ok) break;
-    if (response.status !== 404) break;
-  }
-  if (!response || !response.ok) {
-    throw new Error(
-      `failed to fetch upstream (HTTP ${response?.status ?? 'unknown'}) for ${url}`,
-    );
-  }
-
-  const tmpFile = await Deno.makeTempFile({ suffix: '.tar.gz' });
-  const tmpDir = await Deno.makeTempDir({ prefix: 'reishi-doc-' });
-  try {
-    await Deno.writeFile(tmpFile, new Uint8Array(await response.arrayBuffer()));
-    const tar = new Deno.Command('tar', {
-      args: ['xzf', tmpFile, '--strip-components=1', '-C', tmpDir],
-      stderr: 'piped',
-    });
-    const result = await tar.output();
-    if (!result.success) {
-      throw new Error(`tar failed: ${new TextDecoder().decode(result.stderr)}`);
-    }
-
-    const extracted = subpath
-      ? join(tmpDir, ...subpath.split('/').filter(Boolean))
-      : tmpDir;
-    if (!(await exists(extracted))) {
-      throw new Error(`subpath not found in archive: ${subpath}`);
-    }
-    const info = await Deno.stat(extracted);
-    if (!info.isFile) {
-      throw new Error(
-        `GitHub tree URL must point at a single file for docs add (got dir): ${subpath}`,
-      );
-    }
-    const baseName = subpath.split('/').filter(Boolean).pop() ?? `${repo}.md`;
-    const filename = baseName.endsWith('.md') ? baseName : `${baseName}.md`;
-    const dest = join(projectDir, filename);
-    await refuseOverwrite(dest, options.force ?? false);
-    await Deno.copyFile(extracted, dest);
-    return dest;
-  } finally {
-    try {
-      await Deno.remove(tmpFile);
-    } catch { /* ignore */ }
-    try {
-      await Deno.remove(tmpDir, { recursive: true });
-    } catch { /* ignore */ }
-  }
-}
-
-// ============================================================================
-// Remove
-// ============================================================================
-
-/**
- * Delete `<docs.source>/<project>/<fragment>`. Does NOT cascade to target
- * project roots — users re-sync to propagate deletions.
- */
-export async function removeFragment(
-  project: string,
-  fragment: string,
-): Promise<string> {
-  const dir = join(await getDocsSourceDir(), project);
-  const dest = join(dir, fragment);
-  if (!(await exists(dest))) {
-    throw new Error(`fragment not found: ${project}/${fragment}`);
-  }
-  await Deno.remove(dest);
-  return dest;
-}
+// Fragment-level add/remove retired in Phase 7: users manage fragment files
+// directly. `rei docs add/remove` now operates at the project level — see
+// addDocProject / removeDocProject above.
 
 // ============================================================================
 // Index compilation
@@ -730,18 +562,3 @@ export function formatCompileSummary(
   } ${dim(italic(`(${verb} to ${targetSubdir})`))}`;
 }
 
-/** Compact summary for a batch of sync runs. */
-export function printDocsSyncSummary(runs: DocsSyncRun[]): void {
-  if (runs.length === 0) return;
-  const config = {
-    indexFilename: 'AGENTS.md',
-    targetSubdir: '.agents/docs',
-  };
-  // Best-effort — callers that want the real filenames pass them explicitly
-  // via formatCompileSummary. printDocsSyncSummary is for the unified view.
-  for (const run of runs) {
-    console.log(
-      formatCompileSummary(run.project, run.result, config.indexFilename, config.targetSubdir),
-    );
-  }
-}

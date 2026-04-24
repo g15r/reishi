@@ -308,7 +308,7 @@ Deno.test('rei rules sync: skills are untouched', async () => {
 
 Deno.test('syncAll + syncRules: both content types land at their respective targets', async () => {
   const { syncAll } = await import('./sync.ts');
-  const { addRule, syncRules } = await import('./rules.ts');
+  const { syncRules } = await import('./rules.ts');
   const { fixturesPath } = await import('./test-helpers.ts');
   const env = await setupIsolatedEnv();
   try {
@@ -326,8 +326,13 @@ Deno.test('syncAll + syncRules: both content types land at their respective targ
         '---\nname: alpha\ndescription: test\n---\n',
       );
 
-      // Seed a rule from the repo fixtures.
-      await addRule(fixturesPath('rules', 'no-deletes.md'));
+      // Seed a rule directly into the isolated rules source.
+      const rulesDir = join(env.home, '.config', 'reishi', 'rules');
+      await Deno.mkdir(rulesDir, { recursive: true });
+      await Deno.copyFile(
+        fixturesPath('rules', 'no-deletes.md'),
+        join(rulesDir, 'no-deletes.md'),
+      );
 
       const skillResults = await syncAll();
       const ruleResults = await syncRules();

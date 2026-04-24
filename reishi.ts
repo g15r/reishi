@@ -1,4 +1,4 @@
-#!/usr/bin/env -S deno run --allow-read --allow-write --allow-env=HOME,EDITOR,REISHI_CONFIG,REISHI_LOCKFILE --allow-net=platform.claude.com,code.claude.com,github.com,codeload.github.com --allow-run
+#!/usr/bin/env -S deno run --allow-read --allow-write --allow-env=HOME,EDITOR,REISHI_CONFIG,REISHI_LOCKFILE --allow-net=platform.claude.com,code.claude.com,github.com,codeload.github.com --allow-run=tar
 
 /**
  * reishi - Unified CLI for Claude Agent Skill management

@@ -1,6 +1,16 @@
 # Completed Work Log
 
-## Phase 7: Command Restructure, Sync/Pull Split, and Lockfile 🌀
+## Phase 7: Command Restructure, Sync/Pull Split, and Lockfile ✅
+
+### Dead code cleanup
+
+Removed functions, types, and helpers that the rest of Phase 7 made dead. Also narrowed `--allow-run` now that `config edit` is gone.
+
+- [x] Removed `addRule`, `addRuleFromLocal`, `addRuleFromUrl`, `addRuleFromGithubTree`, `refuseOverwrite`, `removeRule`, `unsyncRule`, `validateRules` from `rules.ts`; dropped `AddRuleOptions`, `RuleValidationIssue`, `RuleValidationResult` types; dropped the `void rulesDir` reservation (it lived inside `removeRule`); trimmed unused imports (`basename`, `extname`, `HttpFetcher`)
+- [x] Removed `addFragment`, `addFragmentFromLocal`, `addFragmentFromUrl`, `addFragmentFromGithubTree`, `refuseOverwrite`, `removeFragment`, `printDocsSyncSummary` from `docs.ts`; dropped `AddFragmentOptions` type; trimmed unused imports (`basename`, `HttpFetcher`)
+- [x] Dropped unused `getRulesSourceDir` import in `reishi.ts` (dropped during the command restructure; verified no other consumer)
+- [x] Narrowed `--allow-run` to `--allow-run=tar` in `deno.json` (every subcommand) and the `reishi.ts` shebang — only `tar` is spawned at runtime now (`config edit` was the only other subprocess caller and it's gone)
+- [x] Trimmed test files: removed add/remove/validate tests from `rules_test.ts`; removed add/remove fragment tests from `docs_test.ts`; inlined the rule-fixture setup in `sync_integration_test.ts` to a direct `Deno.copyFile` (no dependency on the deleted `addRule`); swapped the `removeFragment` call in the `compileToTarget: re-compile clears stale fragments` test for a direct `Deno.remove`
 
 ### Simplify status
 
