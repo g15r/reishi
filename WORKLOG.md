@@ -2,6 +2,17 @@
 
 ## Phase 7: Command Restructure, Sync/Pull Split, and Lockfile 🌀
 
+### SHA-based upstream freshness
+
+`pullSkill` now probes the GitHub commits API for the remote HEAD SHA before downloading. When the lockfile's `sha` matches, the tarball fetch is skipped entirely. When it doesn't (or lockfile has no sha yet), the download runs and both `sha` and `synced_at` get written back on success.
+
+- [x] Added `fetchRemoteSha(entry, fetcher)` helper in `sync.ts` that calls `GET /repos/{owner}/{repo}/commits/{ref}` and returns the SHA string (or null on any failure)
+- [x] `fetchUpstreamForSkill` probes the remote SHA up front and short-circuits when it matches the lockfile's `sha` — no download, no tempfile, no tree hash. Honors dry-run.
+- [x] On successful download, the lockfile gets updated with both the new `sha` and a fresh `synced_at`. The write only happens when state actually changed (content diff OR the SHA moved relative to what's stored) — dirty-bit semantics.
+- [x] `checkForUpdates` already compares against lockfile `sha` from the earlier lockfile foundation commit; no change needed here.
+- [x] Added `shaAwareFetcher(tarballPath, sha)` helper to `sync_fetch_test.ts` that dispatches commits-API URLs to a JSON `{sha}` response and archive URLs to the fixture tarball
+- [x] Tests: SHA match skips fetch and leaves lockfile untouched; SHA mismatch downloads, overwrites source, and writes the new sha + synced_at
+
 ### Split `sync` and `pull`
 
 `sync` is now strictly local (source → targets). `pull` is the network operation (GitHub → source) that auto-syncs afterward. Upstream fetching was previously entangled with `syncSkill` and exposed via a `fetchUpstream: boolean` option; the new model has two separate entry points.

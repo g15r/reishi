@@ -771,8 +771,37 @@ export async function fetchUpstream(
 }
 
 /**
+ * Fetch the remote HEAD SHA for a tracked skill's ref. Returns null when the
+ * source URL isn't a supported GitHub URL, or the API call fails. Errors are
+ * not thrown — callers treat null as "unknown" and proceed with a full fetch.
+ */
+async function fetchRemoteSha(
+  entry: SkillLockEntry,
+  fetcher: HttpFetcher,
+): Promise<string | null> {
+  const url = commitShaUrl(entry.source_url, entry.ref);
+  if (!url) return null;
+  try {
+    const response = await fetcher(url);
+    if (!response.ok) return null;
+    const body = await response.json() as { sha?: string };
+    return body.sha ?? null;
+  } catch {
+    return null;
+  }
+}
+
+/**
  * Internal worker that actually performs the upstream fetch + overwrite. Kept
  * separate so `pullSkill` can reuse it without re-reading the lockfile.
+ *
+ * Flow:
+ *   1. Fetch the remote HEAD SHA via the GitHub commits API.
+ *   2. If the SHA matches the lockfile's `sha`, skip the tarball download
+ *      entirely and report "up-to-date" (lockfile is unchanged — dirty bit).
+ *   3. Otherwise, handle the local-modification prompt, download+extract,
+ *      compute the file diff, and swap the source dir.
+ *   4. On success, update both `sha` and `synced_at` in the lockfile.
  */
 async function fetchUpstreamForSkill(
   skillName: string,
@@ -782,6 +811,21 @@ async function fetchUpstreamForSkill(
   const fetcher = options.fetcher ?? fetch;
   const sourceDir = await getSourceDir();
   const skillDir = join(sourceDir, skillName);
+  const emptyDiff = { added: [], modified: [], removed: [] };
+
+  // SHA probe: if the remote SHA matches the lockfile's `sha`, nothing has
+  // moved upstream — skip the download.
+  const remoteSha = await fetchRemoteSha(entry, fetcher);
+  if (remoteSha && entry.sha && remoteSha === entry.sha) {
+    if (!options.dryRun) {
+      console.log(`${dim(italic('Up-to-date:'))} ${magenta(skillName)}`);
+    } else {
+      console.log(
+        `${dim(italic('would skip'))} ${magenta(skillName)} ${dim(italic('(remote SHA matches)'))}`,
+      );
+    }
+    return { fetched: true, changed: false, diff: emptyDiff };
+  }
 
   // Local-modification detection: if any file's mtime is newer than the
   // last recorded synced_at, the user has likely edited the skill in place.
@@ -803,7 +847,7 @@ async function fetchUpstreamForSkill(
         return {
           fetched: false,
           changed: false,
-          diff: { added: [], modified: [], removed: [] },
+          diff: emptyDiff,
           aborted: true,
           reason,
         };
@@ -820,7 +864,7 @@ async function fetchUpstreamForSkill(
     return {
       fetched: false,
       changed: false,
-      diff: { added: [], modified: [], removed: [] },
+      diff: emptyDiff,
       aborted: true,
       reason: message,
     };
@@ -849,11 +893,20 @@ async function fetchUpstreamForSkill(
       await Deno.rename(staging, skillDir);
     }
 
-    // Always update synced_at so a later mtime check doesn't see "modified".
+    // Update sha + synced_at after a successful pull so the next run's SHA
+    // probe can short-circuit. Only write the lockfile when something actually
+    // changed (content or SHA) — the dirty-bit rule.
     const freshLock = await loadLockfile();
     const current = freshLock.skills[skillName] ?? entry;
-    freshLock.skills[skillName] = { ...current, synced_at: new Date().toISOString() };
-    await saveLockfile(freshLock);
+    const needsSha = remoteSha !== null && current.sha !== remoteSha;
+    if (changed || needsSha) {
+      freshLock.skills[skillName] = {
+        ...current,
+        synced_at: new Date().toISOString(),
+        ...(remoteSha ? { sha: remoteSha } : {}),
+      };
+      await saveLockfile(freshLock);
+    }
 
     if (changed) {
       console.log(

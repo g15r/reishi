@@ -6,16 +6,6 @@ Overhaul of the first-pass v1 work: introduce a lockfile to separate config from
 
 The objectives below are mostly sequential — later work reads state written by earlier work, so treat this as a single-agent pass rather than a parallelizable phase. Conceptual model lives in `AGENTS.md`; implementation needs to catch up to it.
 
-### SHA-based upstream freshness
-
-Replace mtime-based upstream staleness with SHA comparison against GitHub.
-
-- [ ] On `rei skills pull`: `GET /repos/{owner}/{repo}/commits/{ref}` (single lightweight call per skill) to get HEAD SHA
-- [ ] Compare against lockfile `sha` — skip download if unchanged
-- [ ] On successful pull: update `sha` and `synced_at` in lockfile
-- [ ] `checkForUpdates` uses the same SHA comparison, wired to lockfile (dirty-bit write — only save lockfile when state actually changed)
-- [ ] Tests: SHA match skips fetch, SHA mismatch triggers fetch, lockfile updated only after real pull
-
 ### Divergence protection
 
 When pulling upstream content, protect locally modified files automatically. No prompts; pull is always safe.

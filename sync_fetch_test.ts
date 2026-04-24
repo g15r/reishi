@@ -424,6 +424,128 @@ Deno.test('sync (local mods, prompt declines): aborts with declined reason', asy
   }
 });
 
+/** Fetcher that dispatches GitHub-like URLs: commits API → JSON {sha}, tarball → bytes. */
+function shaAwareFetcher(tarballPath: string, sha: string) {
+  return async (url: string): Promise<Response> => {
+    if (url.includes('/commits/')) {
+      return new Response(JSON.stringify({ sha }), {
+        status: 200,
+        headers: { 'content-type': 'application/json' },
+      });
+    }
+    const bytes = await Deno.readFile(tarballPath);
+    return new Response(bytes, {
+      status: 200,
+      headers: { 'content-type': 'application/gzip' },
+    });
+  };
+}
+
+Deno.test('pull (SHA match): skips download when lockfile sha matches remote', async () => {
+  const env = await setupIsolatedEnv();
+  const tarball = await makeFixtureTarball('single-skill-repo');
+  try {
+    await withEnv(env.env, async () => {
+      await seedSkill(env.sourceDir, 'single-skill-repo');
+      await Deno.mkdir(join(env.home, '.claude', 'skills'), { recursive: true });
+      const initialSha = 'abc123';
+      const initialSynced = new Date(Date.now() - 5_000).toISOString();
+      await writeLockfile(env.lockfilePath, {
+        skills: {
+          'single-skill-repo': {
+            source_url: 'https://github.com/fakeuser/single-skill-repo',
+            subpath: '',
+            ref: 'main',
+            sha: initialSha,
+            synced_at: initialSynced,
+          },
+        },
+      });
+
+      const result = await pullSkill('single-skill-repo', {
+        fetcher: shaAwareFetcher(tarball, initialSha),
+      });
+
+      // Fetch was short-circuited, no diff, no source overwrite.
+      assertEquals(result.fetch.fetched, true);
+      assertEquals(result.fetch.changed, false);
+      const src = await Deno.readTextFile(
+        join(env.sourceDir, 'single-skill-repo', 'SKILL.md'),
+      );
+      assert(src.includes('description: stale'), 'source should not have been overwritten');
+
+      // Lockfile synced_at unchanged (no dirty write).
+      const lock = await readLockfile(env.lockfilePath);
+      assertEquals(lock.skills['single-skill-repo'].synced_at, initialSynced);
+    });
+  } finally {
+    try {
+      await Deno.remove(tarball);
+    } catch { /* ignore */ }
+    await env.cleanup();
+  }
+});
+
+Deno.test('pull (SHA mismatch): fetches and updates lockfile sha + synced_at', async () => {
+  const env = await setupIsolatedEnv();
+  const tarball = await makeFixtureTarball('single-skill-repo');
+  try {
+    await withEnv(env.env, async () => {
+      await seedSkill(env.sourceDir, 'single-skill-repo');
+      await Deno.mkdir(join(env.home, '.claude', 'skills'), { recursive: true });
+      const oldMtime = new Date(Date.now() - 60_000);
+      await Deno.utime(
+        join(env.sourceDir, 'single-skill-repo', 'SKILL.md'),
+        oldMtime,
+        oldMtime,
+      );
+      await Deno.utime(
+        join(env.sourceDir, 'single-skill-repo', 'scripts', 'run.sh'),
+        oldMtime,
+        oldMtime,
+      );
+      const initialSynced = new Date(Date.now() - 5_000).toISOString();
+      await writeLockfile(env.lockfilePath, {
+        skills: {
+          'single-skill-repo': {
+            source_url: 'https://github.com/fakeuser/single-skill-repo',
+            subpath: '',
+            ref: 'main',
+            sha: 'old-sha',
+            synced_at: initialSynced,
+          },
+        },
+      });
+
+      const newSha = 'new-sha-deadbeef';
+      const result = await pullSkill('single-skill-repo', {
+        fetcher: shaAwareFetcher(tarball, newSha),
+      });
+
+      // Fetch ran and source was overwritten.
+      assertEquals(result.fetch.fetched, true);
+      assertEquals(result.fetch.changed, true);
+      const src = await Deno.readTextFile(
+        join(env.sourceDir, 'single-skill-repo', 'SKILL.md'),
+      );
+      assert(src.includes('A test fixture skill'));
+
+      // Lockfile sha advanced; synced_at newer than before.
+      const lock = await readLockfile(env.lockfilePath);
+      assertEquals(lock.skills['single-skill-repo'].sha, newSha);
+      assert(
+        lock.skills['single-skill-repo'].synced_at! > initialSynced,
+        'synced_at should advance',
+      );
+    });
+  } finally {
+    try {
+      await Deno.remove(tarball);
+    } catch { /* ignore */ }
+    await env.cleanup();
+  }
+});
+
 Deno.test('fetchUpstream (direct): exposes structured diff for tracked skill', async () => {
   const env = await setupIsolatedEnv();
   const tarball = await makeFixtureTarball('single-skill-repo');
