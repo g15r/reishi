@@ -26,8 +26,8 @@ mkdir -p bin
 PERMS=(
   --allow-read
   --allow-write
-  --allow-env=HOME,EDITOR,REISHI_CONFIG
-  --allow-net=platform.claude.com,code.claude.com,github.com,codeload.github.com
+  --allow-env=HOME,REISHI_CONFIG
+  --allow-net=github.com,codeload.github.com
   --allow-run
 )
 

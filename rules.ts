@@ -14,9 +14,9 @@
 import { basename, dirname, join, resolve } from '@std/path';
 import { copy, exists } from '@std/fs';
 import { dim, green, italic, magenta, red, yellow } from '@std/fmt/colors';
-import { expandHome, loadConfig, type SyncMethod } from './config.ts';
+import { loadConfig, type SyncMethod } from './config.ts';
 import { getRulesSourceDir } from './paths.ts';
-import { resolveMethod } from './sync.ts';
+import { resolveMethod, resolveRuleTargets } from './sync.ts';
 
 // ============================================================================
 // Types
@@ -32,7 +32,7 @@ export interface RuleEntry {
 }
 
 export interface RulesSyncOptions {
-  targets?: string[];
+  agents?: string[];
   method?: SyncMethod;
   dryRun?: boolean;
 }
@@ -100,15 +100,15 @@ export async function syncRules(
   const rules = await listRules();
   const results: RulesSyncResult[] = [];
 
-  if (options.targets) {
-    const unknown = options.targets.filter((t) => !(t in config.rules.targets));
+  if (options.agents) {
+    const unknown = options.agents.filter((t) => !(t in config.agents));
     if (unknown.length > 0) {
       return [{
         ruleName: '(filter)',
         target: unknown.join(','),
         targetPath: '',
         action: 'failed',
-        reason: `unknown target(s): ${unknown.join(', ')}`,
+        reason: `unknown agent(s): ${unknown.join(', ')}`,
       }];
     }
   }
@@ -119,9 +119,8 @@ export async function syncRules(
     options.method,
   );
 
-  for (const [targetName, rawPath] of Object.entries(config.rules.targets)) {
-    if (options.targets && !options.targets.includes(targetName)) continue;
-    const targetRoot = expandHome(rawPath);
+  const targets = resolveRuleTargets(options.agents, config.agents);
+  for (const { name: targetName, path: targetRoot } of targets) {
     const targetParent = dirname(targetRoot);
     if (!(await exists(targetParent))) {
       for (const rule of rules) {

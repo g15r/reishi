@@ -394,7 +394,7 @@ Deno.test('compileToTarget: re-compile clears stale fragments', async () => {
 });
 
 // ============================================================================
-// syncDocs — respects [docs.projects] mapping
+// syncDocs — respects [projects] mapping
 // ============================================================================
 
 Deno.test('syncDocs: compiles and writes to configured target', async () => {
@@ -407,9 +407,9 @@ Deno.test('syncDocs: compiles and writes to configured target', async () => {
           source: env.docsDir,
           default_target: '.agents/docs',
           index_filename: 'AGENTS.md',
-          projects: {
-            'myproject-a': { target: env.projectDir },
-          },
+        },
+        projects: {
+          'myproject-a': { path: env.projectDir },
         },
       });
       resetPathCache();
@@ -435,11 +435,11 @@ Deno.test('syncDocs: fragments filter limits what gets distributed', async () =>
           source: env.docsDir,
           default_target: '.agents/docs',
           index_filename: 'AGENTS.md',
-          projects: {
-            'myproject-a': {
-              target: env.projectDir,
-              fragments: ['api-conventions.md'],
-            },
+        },
+        projects: {
+          'myproject-a': {
+            path: env.projectDir,
+            fragments: ['api-conventions.md'],
           },
         },
       });
@@ -467,10 +467,10 @@ Deno.test('syncDocs: iterates multiple configured projects', async () => {
           source: env.docsDir,
           default_target: '.agents/docs',
           index_filename: 'AGENTS.md',
-          projects: {
-            'myproject-a': { target: env.projectDir },
-            'myproject-b': { target: projectB },
-          },
+        },
+        projects: {
+          'myproject-a': { path: env.projectDir },
+          'myproject-b': { path: projectB },
         },
       });
       resetPathCache();

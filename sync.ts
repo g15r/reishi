@@ -14,6 +14,7 @@ import { dirname, extname, join, resolve } from '@std/path';
 import { copy, exists } from '@std/fs';
 import { dim, green, italic, magenta, red, yellow } from '@std/fmt/colors';
 import {
+  type AgentConfig,
   expandHome,
   loadConfig,
   loadLockfile,
@@ -36,8 +37,8 @@ export type PromptChoice = (
 ) => Promise<string | null>;
 
 export interface SyncOptions {
-  /** Restrict to this subset of target names (from [paths.targets]). */
-  targets?: string[];
+  /** Restrict to this subset of agent names (from [agents]). */
+  agents?: string[];
   /** Override the resolved sync method entirely. */
   method?: SyncMethod;
   /** Plan only — no writes. */
@@ -77,25 +78,46 @@ interface ResolvedTarget {
 }
 
 /**
- * Resolve the list of targets to sync to, applying:
- *   - per-skill targets allow-list
- *   - CLI --targets filter
- *   - non-existent parent dir = skip with warning
+ * Resolve the list of skill targets to sync to, applying:
+ *   - per-skill agents allow-list
+ *   - CLI --agents filter
+ *
+ * Extracts the `skills` path from each agent config entry.
  */
-async function resolveTargets(
-  skillEntry: { targets?: string[] } | undefined,
-  filterTargets: string[] | undefined,
-  allTargets: Record<string, string>,
+async function resolveSkillTargets(
+  skillEntry: { agents?: string[] } | undefined,
+  filterAgents: string[] | undefined,
+  allAgents: Record<string, AgentConfig>,
 ): Promise<ResolvedTarget[]> {
-  const allowed = skillEntry?.targets;
+  const allowed = skillEntry?.agents;
   const out: ResolvedTarget[] = [];
-  for (const [name, rawPath] of Object.entries(allTargets)) {
+  for (const [name, agent] of Object.entries(allAgents)) {
     if (allowed && !allowed.includes(name)) continue;
-    if (filterTargets && !filterTargets.includes(name)) continue;
-    out.push({ name, path: expandHome(rawPath) });
+    if (filterAgents && !filterAgents.includes(name)) continue;
+    out.push({ name, path: expandHome(agent.skills) });
   }
   return out;
 }
+
+/**
+ * Resolve the list of rule targets to sync to, applying:
+ *   - CLI --agents filter
+ *
+ * Extracts the `rules` path from each agent config entry.
+ */
+function resolveRuleTargets(
+  filterAgents: string[] | undefined,
+  allAgents: Record<string, AgentConfig>,
+): ResolvedTarget[] {
+  const out: ResolvedTarget[] = [];
+  for (const [name, agent] of Object.entries(allAgents)) {
+    if (filterAgents && !filterAgents.includes(name)) continue;
+    out.push({ name, path: expandHome(agent.rules) });
+  }
+  return out;
+}
+
+export { resolveRuleTargets };
 
 /**
  * Decide the sync method using the configured precedence.
@@ -155,21 +177,21 @@ export async function syncSkill(
   }
 
   const refreshed = await loadConfig();
-  const configEntry = refreshed.skills?.[activeSkillName];
-  if (options.targets) {
-    const unknown = options.targets.filter((t) => !(t in refreshed.paths.targets));
+  const configEntry = refreshed.skill_overrides?.[activeSkillName];
+  if (options.agents) {
+    const unknown = options.agents.filter((t) => !(t in refreshed.agents));
     if (unknown.length > 0) {
       return [{
         skillName: activeSkillName,
         target: unknown.join(','),
         targetPath: '',
         action: 'failed',
-        reason: `unknown target(s): ${unknown.join(', ')}`,
+        reason: `unknown agent(s): ${unknown.join(', ')}`,
       }];
     }
   }
 
-  const targets = await resolveTargets(configEntry, options.targets, refreshed.paths.targets);
+  const targets = await resolveSkillTargets(configEntry, options.agents, refreshed.agents);
   if (targets.length === 0) return [];
 
   const method = resolveMethod(refreshed.sync_method, configEntry?.sync_method, options.method);
@@ -275,11 +297,11 @@ export async function syncAll(options: SyncOptions = {}): Promise<SyncResult[]> 
  */
 export async function unsyncSkill(
   skillName: string,
-  options: { targets?: string[] } = {},
+  options: { agents?: string[] } = {},
 ): Promise<SyncResult[]> {
   const config = await loadConfig();
-  const entry = config.skills?.[skillName];
-  const targets = await resolveTargets(entry, options.targets, config.paths.targets);
+  const entry = config.skill_overrides?.[skillName];
+  const targets = await resolveSkillTargets(entry, options.agents, config.agents);
   const results: SyncResult[] = [];
 
   for (const target of targets) {
@@ -374,12 +396,12 @@ export async function syncStatus(): Promise<SkillStatus[]> {
 
   for (const name of skillNames) {
     const skillSource = join(sourceDir, name);
-    const configEntry = config.skills?.[name];
+    const configEntry = config.skill_overrides?.[name];
     const lockEntry = lockfile.skills[name];
     const syncedAt = lockEntry?.synced_at ? Date.parse(lockEntry.synced_at) : 0;
     const sourceMtime = await newestFileMtime(skillSource);
     const diverged = syncedAt > 0 && sourceMtime > syncedAt;
-    const targets = await resolveTargets(configEntry, undefined, config.paths.targets);
+    const targets = await resolveSkillTargets(configEntry, undefined, config.agents);
 
     for (const target of targets) {
       const targetPath = join(target.path, name);
@@ -1130,7 +1152,7 @@ async function maybeApplyPrefixChange(
   }
 
   if (mode === 'rename') {
-    await renameSkillEverywhere(skillName, newName, config.paths.targets);
+    await renameSkillEverywhere(skillName, newName, config.agents);
     await rekeySkillEntry(skillName, newName);
     console.log(
       `${green('🪪 Renamed')} ${magenta(skillName)} → ${magenta(newName)}`,
@@ -1151,7 +1173,7 @@ async function maybeApplyPrefixChange(
 async function renameSkillEverywhere(
   oldName: string,
   newName: string,
-  targets: Record<string, string>,
+  agents: Record<string, AgentConfig>,
 ): Promise<void> {
   const sourceDir = await getSourceDir();
   const deactivatedDir = await getDeactivatedDir();
@@ -1164,8 +1186,8 @@ async function renameSkillEverywhere(
   if (await exists(oldDeactivated)) {
     await Deno.rename(oldDeactivated, join(deactivatedDir, newName));
   }
-  for (const rawPath of Object.values(targets)) {
-    const targetRoot = expandHome(rawPath);
+  for (const agent of Object.values(agents)) {
+    const targetRoot = expandHome(agent.skills);
     const oldTarget = join(targetRoot, oldName);
     const newTarget = join(targetRoot, newName);
     let present = false;
@@ -1249,7 +1271,7 @@ export async function checkForUpdates(
   const fetcher = options.fetcher ?? fetch;
   const config = await loadConfig();
   const lockfile = await loadLockfile();
-  const configSkills = config.skills ?? {};
+  const configSkills = config.skill_overrides ?? {};
   const names = skillName ? [skillName] : Object.keys(lockfile.skills);
   const results: UpdateCheck[] = [];
 

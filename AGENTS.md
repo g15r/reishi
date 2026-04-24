@@ -21,15 +21,20 @@ The goal is to make it easy to figure out what works for you and freely move con
 ### Source of truth
 
 All managed content lives in a single source directory per construct:
-- Skills: `paths.source` (default `~/.config/reishi/skills/`)
+- Skills: `skills.source` (default `~/.config/reishi/skills/`)
 - Rules: `rules.source` (default `~/.config/reishi/rules/`)
 - Docs: `docs.source` (default `~/.config/reishi/docs/`)
 
 These are where users create, edit, and customize content. They are always authoritative — reishi never writes to source directories without explicit user action.
 
-### Targets
+### Agents and projects
 
-Targets are agent-specific directories where content needs to be available (e.g. `~/.claude/skills/`, `~/.claude/rules/`). Reishi distributes from source to targets automatically via copy or symlink. Target files are overwritten on every sync. Targets are output, not input.
+Destinations are organized into two types:
+
+- **Agents** — Named destinations for skills and rules. Each agent groups a `skills` path and a `rules` path (e.g. `[agents.claude]` with `skills = "~/.claude/skills"` and `rules = "~/.claude/rules"`). Use `--agents=<name>` on sync/pull to filter.
+- **Projects** — Named destinations for docs. Each project maps a name to a project root on disk (e.g. `[projects.myproject]` with `path = "~/code/myproject"`). Use `--projects=<name>` on docs sync to filter.
+
+Reishi distributes from source to these destinations automatically via copy or symlink. Destination files are overwritten on every sync. Destinations are output, not input.
 
 ### Tracking (skills only)
 
@@ -53,7 +58,7 @@ Pull is always safe — it never destroys user work.
 
 ### Config vs lockfile
 
-- **`config.toml`** — User-edited configuration: paths, sync method, targets, prefix settings, update polling. Pure preferences, no state.
+- **`config.toml`** — User-edited configuration: source paths, sync method, agent/project destinations, prefix settings, update polling. Pure preferences, no state.
 - **`reishi-lock.toml`** — Machine-managed tracking state: per-skill upstream URL, ref, subpath, prefix, SHA, `synced_at`. Written by `rei skills add -t` and `rei skills pull`.
 
 Both live in the reishi config directory (default `~/.config/reishi/`).
@@ -72,7 +77,7 @@ deno task install                 # Install globally as `rei`
 Four top-level domains, each a subcommand group:
 
 ```text
-rei skills  [new|validate|add|list|activate|deactivate|pull|sync|status|updates]
+rei skills  [new|validate|add|list|activate|deactivate|pull|sync]
 rei rules   [list|sync]
 rei docs    [list|add|remove|sync]
 rei config  [init|show|path]
@@ -90,10 +95,8 @@ rei skills add <github-url> [-t] [-p]     # install from GitHub
 rei skills list [-a]                      # list active (or all) skills
 rei skills activate <name>                # re-enable a deactivated skill
 rei skills deactivate <name>              # temporarily disable
-rei skills pull [name] [--dry-run]        # fetch upstream for tracked skills
-rei skills sync [name] [--targets] [--method] [--dry-run]  # distribute to targets
-rei skills status                         # per skill x target freshness report
-rei skills updates [name] [--pull]        # check upstream for changes
+rei skills pull [name] [--dry-run] [--check]  # fetch upstream / check for updates
+rei skills sync [name] [--agents] [--method] [--dry-run] [--check]  # distribute to agents
 ```
 
 #### new
@@ -136,21 +139,12 @@ Fetch upstream for tracked skills with divergence protection:
 
 **Prefix changes**: if `prefix` was edited in the lockfile, pull detects the mismatch and prompts for resolution (rename / parallel / abort). Use `--prefix-change=rename|parallel|abort` for non-interactive flows.
 
-#### status
+#### --check (inspection mode)
 
-Report per skill x target: `fresh`, `stale` (upstream moved since last pull), `diverged` (source modified since last pull), `missing`, or `symlink`. Anchored on lockfile state.
+Both `sync` and `pull` accept `--check` to inspect state without writing:
 
-#### updates
-
-Lightweight upstream check — fetches HEAD SHA without downloading content:
-
-```bash
-rei skills updates              # check all tracked
-rei skills updates book-review  # check one
-rei skills updates --pull       # check, then pull any with changes
-```
-
-**Background notifications**: when `[updates].enabled = true` and `interval_hours` has elapsed, common commands fire a non-blocking background check and print a one-liner if updates are available.
+- **`rei skills sync --check`** — Report per skill × agent freshness: `fresh`, `stale`, `diverged`, `missing`, `symlink`. Local only, no network.
+- **`rei skills pull --check`** — Lightweight upstream check — fetches HEAD SHA per tracked skill, reports which have updates. No downloads.
 
 ### rei rules
 
@@ -160,7 +154,7 @@ Users manage the files directly — create, edit, delete with their editor or fi
 
 ```bash
 rei rules list                                                      # list all rules in source
-rei rules sync [--targets=claude] [--method=symlink] [--dry-run]    # distribute to targets
+rei rules sync [--agents=claude] [--method=symlink] [--dry-run]     # distribute to agent targets
 ```
 
 ### rei docs
@@ -199,7 +193,7 @@ Top-level convenience — syncs all three domains (skills, rules, docs) to targe
 
 ```bash
 rei sync                          # sync everything
-rei sync --targets=claude,agents  # limit to specific targets
+rei sync --agents=claude          # limit to specific agents
 rei sync --method=symlink         # override sync method
 rei sync --dry-run                # preview without writing
 ```
@@ -219,12 +213,8 @@ sync_method = "copy"            # "copy" or "symlink"
 default_prefix = "infer"        # "infer" from GitHub org, or "none"
 prefix_separator = "_"
 
-[paths]
+[skills]
 source = "~/.config/reishi/skills"
-
-[paths.targets]
-claude = "~/.claude/skills"
-# agents = "~/.agents/skills"
 
 [updates]
 enabled = true
@@ -234,8 +224,13 @@ interval_hours = 24
 source = "~/.config/reishi/rules"
 # sync_method = "symlink"      # inherits global if unset
 
-[rules.targets]
-claude = "~/.claude/rules"
+[agents.claude]
+skills = "~/.claude/skills"
+rules = "~/.claude/rules"
+
+# [agents.opencode]
+# skills = "~/.opencode/skills"
+# rules = "~/.opencode/rules"
 
 [docs]
 source = "~/.config/reishi/docs"
@@ -244,14 +239,14 @@ index_filename = "AGENTS.md"
 # sync_method = "symlink"
 # token_budget = 4000
 
-[docs.projects.myproject]
-target = "~/code/myproject"
+[projects.myproject]
+path = "~/code/myproject"
 # fragments = ["api-conventions.md", "testing.md"]
 
 # Per-skill config overrides (optional)
-[skills.book-review]
+[skill_overrides.book-review]
 sync_method = "symlink"
-targets = ["claude"]
+agents = ["claude"]
 ```
 
 ## Lockfile Schema
@@ -292,7 +287,7 @@ All tests use `REISHI_CONFIG`-redirected temp dirs and offline fixture helpers (
 | --- | --- |
 | `reishi.ts` | Cliffy command definitions and action wiring |
 | `config.ts` | TOML schema, `loadConfig` / `saveConfig` / `initConfig`, deep-merge with defaults |
-| `paths.ts` | Resolves `paths.source`, `rules.source`, `docs.source`, cached per session |
+| `paths.ts` | Resolves `skills.source`, `rules.source`, `docs.source`, cached per session |
 | `sync.ts` | Target sync engine, upstream fetch, prefix-change flow, `checkForUpdates` |
 | `rules.ts` | Rules CRUD + sync |
 | `docs.ts` | Fragment CRUD, index compilation with token budget, per-project distribution |

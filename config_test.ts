@@ -88,8 +88,8 @@ Deno.test('loadConfig merges partial config over defaults', async () => {
     assertEquals(cfg.updates.enabled, true);
     assertEquals(cfg.default_prefix, 'infer');
     assertEquals(cfg.prefix_separator, '_');
-    assertEquals(cfg.paths.source, '~/.config/reishi/skills');
-    assertEquals(cfg.paths.targets.claude, '~/.claude/skills');
+    assertEquals(cfg.skills.source, '~/.config/reishi/skills');
+    assertEquals(cfg.agents.claude.skills, '~/.claude/skills');
   });
 });
 
@@ -109,13 +109,13 @@ Deno.test('saveConfig then loadConfig round-trips fidelity', async () => {
     const cfg = defaultConfig();
     cfg.sync_method = 'symlink';
     cfg.updates.interval_hours = 12;
-    cfg.paths.targets = { claude: '~/.claude/skills', agents: '~/.agents/skills' };
+    cfg.agents = { claude: { skills: '~/.claude/skills', rules: '~/.claude/rules' }, agents: { skills: '~/.agents/skills', rules: '~/.agents/rules' } };
     await saveConfig(cfg);
     const loaded = await loadConfig();
     assertEquals(loaded.sync_method, 'symlink');
     assertEquals(loaded.updates.interval_hours, 12);
-    assertEquals(loaded.paths.targets.claude, '~/.claude/skills');
-    assertEquals(loaded.paths.targets.agents, '~/.agents/skills');
+    assertEquals(loaded.agents.claude.skills, '~/.claude/skills');
+    assertEquals(loaded.agents.agents.skills, '~/.agents/skills');
   });
 });
 
@@ -128,7 +128,7 @@ Deno.test('initConfig creates config file, lockfile, and directories', async () 
     // Starter template keeps its helpful comments.
     const contents = await Deno.readTextFile(configPath);
     assertStringIncludes(contents, 'sync_method = "copy"');
-    assertStringIncludes(contents, '[paths]');
+    assertStringIncludes(contents, '[skills]');
     // Source directories created at HOME-relative paths.
     assert(await exists(join(tmp, '.config/reishi/skills')), 'skills dir should exist');
     assert(

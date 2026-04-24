@@ -129,7 +129,12 @@ Deno.test('syncRules: rules.sync_method override wins over global', async () => 
         rules: {
           source: rulesDir,
           sync_method: 'symlink',
-          targets: { claude: join(env.home, '.claude', 'rules') },
+        },
+        agents: {
+          claude: {
+            skills: join(env.home, '.claude', 'skills'),
+            rules: join(env.home, '.claude', 'rules'),
+          },
         },
       });
       resetPathCache();
@@ -153,7 +158,12 @@ Deno.test('syncRules: CLI --method override beats rules.sync_method', async () =
         rules: {
           source: rulesDir,
           sync_method: 'symlink',
-          targets: { claude: join(env.home, '.claude', 'rules') },
+        },
+        agents: {
+          claude: {
+            skills: join(env.home, '.claude', 'skills'),
+            rules: join(env.home, '.claude', 'rules'),
+          },
         },
       });
       resetPathCache();
@@ -177,15 +187,21 @@ Deno.test('syncRules: targets filter restricts to named targets', async () => {
       await patchConfig(env.configPath, {
         rules: {
           source: rulesDir,
-          targets: {
-            claude: join(env.home, '.claude', 'rules'),
-            agents: join(env.home, '.agents', 'rules'),
+        },
+        agents: {
+          claude: {
+            skills: join(env.home, '.claude', 'skills'),
+            rules: join(env.home, '.claude', 'rules'),
+          },
+          agents: {
+            skills: join(env.home, '.agents', 'skills'),
+            rules: join(env.home, '.agents', 'rules'),
           },
         },
       });
       resetPathCache();
 
-      const results = await syncRules({ targets: ['claude'] });
+      const results = await syncRules({ agents: ['claude'] });
       const targetNames = new Set(results.map((r) => r.target));
       assertEquals(targetNames, new Set(['claude']));
       assert(await exists(join(env.home, '.claude', 'rules', 'no-deletes.md')));

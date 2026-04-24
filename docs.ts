@@ -147,11 +147,11 @@ export async function addDocProject(
   }
 
   const config = await loadConfig();
-  const projects = config.docs.projects ?? {};
+  const projects = config.projects ?? {};
   const alreadyInConfig = Boolean(projects[name]);
   if (!alreadyInConfig) {
-    projects[name] = options.target ? { target: options.target } : { target: '' };
-    config.docs.projects = projects;
+    projects[name] = options.target ? { path: options.target } : { path: '' };
+    config.projects = projects;
     await saveConfig(config);
   }
   return { sourceDir: dir, configWritten: !alreadyInConfig };
@@ -178,11 +178,11 @@ export async function removeDocProject(
   options: RemoveDocProjectOptions = {},
 ): Promise<RemoveDocProjectResult> {
   const config = await loadConfig();
-  const projects = config.docs.projects ?? {};
+  const projects = config.projects ?? {};
   const hadEntry = Boolean(projects[name]);
   if (hadEntry) {
     delete projects[name];
-    config.docs.projects = projects;
+    config.projects = projects;
     await saveConfig(config);
   }
 
@@ -499,7 +499,7 @@ export async function syncDocs(
   options: DocsSyncOptions = {},
 ): Promise<DocsSyncRun[]> {
   const config = await loadConfig();
-  const projects = config.docs.projects ?? {};
+  const projects = config.projects ?? {};
 
   type Plan = { project: string; target: string; entry: DocsProjectEntry };
   const plan: Plan[] = [];
@@ -507,22 +507,22 @@ export async function syncDocs(
   if (options.project) {
     const entry = projects[options.project];
     if (entry) {
-      const target = options.targetOverride ?? entry.target;
+      const target = options.targetOverride ?? entry.path;
       plan.push({ project: options.project, target, entry });
     } else if (options.targetOverride) {
       plan.push({
         project: options.project,
         target: options.targetOverride,
-        entry: { target: options.targetOverride },
+        entry: { path: options.targetOverride },
       });
     } else {
       throw new Error(
-        `project '${options.project}' has no [docs.projects] entry — pass --target to override`,
+        `project '${options.project}' has no [projects] entry — pass --target to override`,
       );
     }
   } else {
     for (const [name, entry] of Object.entries(projects)) {
-      plan.push({ project: name, target: entry.target, entry });
+      plan.push({ project: name, target: entry.path, entry });
     }
   }
 

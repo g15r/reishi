@@ -64,14 +64,18 @@ export async function setupIsolatedEnv(
     sync_method: overrides.sync_method ?? 'copy',
     default_prefix: overrides.default_prefix ?? 'none',
     prefix_separator: overrides.prefix_separator ?? '_',
-    paths: {
+    skills: {
       source: sourceDir,
-      targets: { claude: join(home, '.claude', 'skills') },
     },
     updates: { enabled: false, interval_hours: 24 },
     rules: {
       source: join(configDir, 'rules'),
-      targets: { claude: join(home, '.claude', 'rules') },
+    },
+    agents: {
+      claude: {
+        skills: join(home, '.claude', 'skills'),
+        rules: join(home, '.claude', 'rules'),
+      },
     },
     docs: {
       source: docsDir,

@@ -146,18 +146,16 @@ Deno.test('targets filter limits which named targets receive the skill', async (
       const otherTarget = join(env.home, '.agents', 'skills');
       await Deno.mkdir(otherTarget, { recursive: true });
       await patchConfig(env.configPath, {
-        paths: {
-          source: env.sourceDir,
-          targets: {
-            claude: join(env.home, '.claude', 'skills'),
-            agents: otherTarget,
-          },
+        skills: { source: env.sourceDir },
+        agents: {
+          claude: { skills: join(env.home, '.claude', 'skills'), rules: join(env.home, '.claude', 'rules') },
+          agents: { skills: otherTarget, rules: join(env.home, '.agents', 'rules') },
         },
       });
       await Deno.mkdir(join(env.home, '.claude', 'skills'), { recursive: true });
       await seedSkill(env.sourceDir, 'alpha');
 
-      const results = await syncSkill('alpha', { targets: ['claude'] });
+      const results = await syncSkill('alpha', { agents: ['claude'] });
       assertEquals(results.length, 1);
       assertEquals(results[0].target, 'claude');
       assert(!(await exists(join(otherTarget, 'alpha'))));
@@ -175,8 +173,9 @@ Deno.test('per-skill sync_method override wins over global', async () => {
       await seedSkill(env.sourceDir, 'alpha');
       await Deno.mkdir(join(env.home, '.claude', 'skills'), { recursive: true });
       await patchConfig(env.configPath, {
-        paths: { source: env.sourceDir, targets: { claude: join(env.home, '.claude', 'skills') } },
-        skills: {
+        skills: { source: env.sourceDir },
+        agents: { claude: { skills: join(env.home, '.claude', 'skills'), rules: join(env.home, '.claude', 'rules') } },
+        skill_overrides: {
           alpha: { sync_method: 'symlink' },
         },
       });
@@ -198,7 +197,7 @@ Deno.test('CLI --method override beats per-skill and global', async () => {
       await seedSkill(env.sourceDir, 'alpha');
       await Deno.mkdir(join(env.home, '.claude', 'skills'), { recursive: true });
       await patchConfig(env.configPath, {
-        skills: { alpha: { sync_method: 'symlink' } },
+        skill_overrides: { alpha: { sync_method: 'symlink' } },
       });
 
       const results = await syncSkill('alpha', { method: 'copy' });
@@ -235,9 +234,9 @@ Deno.test('missing target parent: skip with warning', async () => {
       // Point a target's parent to a non-existent path; reishi must skip rather
       // than cascade-create deep trees into the user's filesystem.
       await patchConfig(env.configPath, {
-        paths: {
-          source: env.sourceDir,
-          targets: { claude: '/nonexistent-parent-xyz/deep/skills' },
+        skills: { source: env.sourceDir },
+        agents: {
+          claude: { skills: '/nonexistent-parent-xyz/deep/skills', rules: '/nonexistent-parent-xyz/deep/rules' },
         },
       });
       await seedSkill(env.sourceDir, 'alpha');
@@ -290,10 +289,10 @@ Deno.test('--targets validates against known names', async () => {
   try {
     await withEnv(env.env, async () => {
       await seedSkill(env.sourceDir, 'alpha');
-      const results = await syncSkill('alpha', { targets: ['bogus'] });
+      const results = await syncSkill('alpha', { agents: ['bogus'] });
       assertEquals(results.length, 1);
       assertEquals(results[0].action, 'failed');
-      assert(results[0].reason?.includes('unknown target'));
+      assert(results[0].reason?.includes('unknown agent'));
     });
   } finally {
     await env.cleanup();

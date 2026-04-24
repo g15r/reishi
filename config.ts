@@ -17,9 +17,37 @@ import { exists } from '@std/fs';
 export type SyncMethod = 'copy' | 'symlink';
 export type DefaultPrefix = 'infer' | 'none';
 
-export interface PathsConfig {
+// --- Sync target base types ------------------------------------------------
+
+/** Base shape for all sync destinations. */
+export interface SyncTarget {
+  name: string;
+  path: string;
+}
+
+/** Agent destinations group skills + rules paths under one name. */
+export interface AgentTarget extends SyncTarget {
+  skills: string;
+  rules: string;
+}
+
+/** Project destinations point at a project root for docs distribution. */
+export interface ProjectTarget extends SyncTarget {
+  fragments?: string[];
+  token_budget?: number;
+}
+
+/** Base sync options shared across all three domains. */
+export interface BaseSyncOptions {
+  method?: SyncMethod;
+  dryRun?: boolean;
+  check?: boolean;
+}
+
+// --- Config sections -------------------------------------------------------
+
+export interface SkillsConfig {
   source: string;
-  targets: Record<string, string>;
 }
 
 export interface UpdatesConfig {
@@ -32,12 +60,17 @@ export interface UpdatesConfig {
 export interface RulesConfig {
   source: string;
   sync_method?: SyncMethod;
-  targets: Record<string, string>;
+}
+
+/** Per-agent destination config — keys are agent names. */
+export interface AgentConfig {
+  skills: string;
+  rules: string;
 }
 
 export interface DocsProjectEntry {
   /** Absolute or `~`-prefixed path to the project root. */
-  target: string;
+  path: string;
   /**
    * Restrict compiled output to this subset of fragment filenames (basenames
    * in the project's docs.source dir). Undefined = all fragments.
@@ -52,8 +85,6 @@ export interface DocsConfig {
   sync_method?: SyncMethod;
   /** Soft cap on the compiled index size, in approximate tokens (chars/4). */
   token_budget?: number;
-  /** Named project mappings used by `rei docs sync`. */
-  projects?: Record<string, DocsProjectEntry>;
 }
 
 /**
@@ -63,7 +94,7 @@ export interface DocsConfig {
  */
 export interface SkillEntry {
   sync_method?: SyncMethod;
-  targets?: string[];
+  agents?: string[];
   updates?: boolean;
 }
 
@@ -71,11 +102,14 @@ export interface ConfigSchema {
   sync_method: SyncMethod;
   default_prefix: DefaultPrefix;
   prefix_separator: string;
-  paths: PathsConfig;
+  skills: SkillsConfig;
   updates: UpdatesConfig;
   rules: RulesConfig;
+  agents: Record<string, AgentConfig>;
   docs: DocsConfig;
-  skills?: Record<string, SkillEntry>;
+  projects: Record<string, DocsProjectEntry>;
+  /** Per-skill config overrides (optional). */
+  skill_overrides?: Record<string, SkillEntry>;
 }
 
 /**
@@ -145,11 +179,8 @@ export function defaultConfig(): ConfigSchema {
     sync_method: 'copy',
     default_prefix: 'infer',
     prefix_separator: '_',
-    paths: {
+    skills: {
       source: '~/.config/reishi/skills',
-      targets: {
-        claude: '~/.claude/skills',
-      },
     },
     updates: {
       enabled: true,
@@ -157,8 +188,11 @@ export function defaultConfig(): ConfigSchema {
     },
     rules: {
       source: '~/.config/reishi/rules',
-      targets: {
-        claude: '~/.claude/rules',
+    },
+    agents: {
+      claude: {
+        skills: '~/.claude/skills',
+        rules: '~/.claude/rules',
       },
     },
     docs: {
@@ -167,6 +201,7 @@ export function defaultConfig(): ConfigSchema {
       index_filename: 'AGENTS.md',
       token_budget: 4000,
     },
+    projects: {},
   };
 }
 
@@ -304,20 +339,12 @@ default_prefix = "infer"
 prefix_separator = "_"
 
 # ----------------------------------------------------------
-# Paths
+# Skills
 # ----------------------------------------------------------
 
-[paths]
-# Central source of truth — single canonical location for all managed content.
-# All synced skills, rules, and docs land here first.
+[skills]
+# Source of truth for skills — all managed skills live here.
 source = "~/.config/reishi/skills"
-
-# Named sync targets — reishi copies/symlinks from source to these.
-# Keys are arbitrary names; values are paths.
-[paths.targets]
-claude = "~/.claude/skills"
-# agents = "~/.agents/skills"
-# chezmoi = "~/.local/share/chezmoi/dot_agents/skills"
 
 # ----------------------------------------------------------
 # Update polling
@@ -341,9 +368,19 @@ source = "~/.config/reishi/rules"
 # Sync method override for rules (inherits global sync_method if unset)
 # sync_method = "symlink"
 
-[rules.targets]
-claude = "~/.claude/rules"
-# opencode = "~/.opencode/rules"
+# ----------------------------------------------------------
+# Agents — named destinations for skills + rules
+# ----------------------------------------------------------
+
+# Each agent groups a skills path and a rules path under one name.
+# Use --agents=<name> on sync/pull to filter.
+[agents.claude]
+skills = "~/.claude/skills"
+rules = "~/.claude/rules"
+
+# [agents.opencode]
+# skills = "~/.opencode/skills"
+# rules = "~/.opencode/rules"
 
 # ----------------------------------------------------------
 # Docs
@@ -365,10 +402,14 @@ index_filename = "AGENTS.md"
 # Sync method override for docs
 # sync_method = "symlink"
 
-# Named project mappings — the target is a project root on disk. Fragments
-# are optional; omit to include every fragment in <docs.source>/<name>/.
-# [docs.projects.myproject]
-# target = "~/code/myproject"
+# ----------------------------------------------------------
+# Projects — named destinations for docs
+# ----------------------------------------------------------
+
+# Each project maps a name to a project root on disk. Fragments are optional;
+# omit to include every fragment in <docs.source>/<name>/.
+# [projects.myproject]
+# path = "~/code/myproject"
 # fragments = ["api-conventions.md", "testing.md"]
 `;
 
@@ -394,7 +435,7 @@ export async function initConfig(): Promise<InitConfigResult> {
 
   // Create the source directories from the (effective) config.
   const config = await loadConfig();
-  const skillsSource = expandHome(config.paths.source);
+  const skillsSource = expandHome(config.skills.source);
   const dirs = [
     skillsSource,
     join(skillsSource, '_deactivated'),

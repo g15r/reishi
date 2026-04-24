@@ -153,7 +153,7 @@ Deno.test('checkForUpdates: skips skills with updates=false in config', async ()
       });
       // Per-skill updates disable lives in config, not lockfile.
       await writeConfig(env.configPath, {
-        skills: { alpha: { updates: false } },
+        skill_overrides: { alpha: { updates: false } },
       });
       const checks = await checkForUpdates(undefined, {
         fetcher: fakeShaFetcher('new'),

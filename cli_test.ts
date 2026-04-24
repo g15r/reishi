@@ -26,8 +26,8 @@ async function runrei(
       'run',
       '--allow-read',
       '--allow-write',
-      '--allow-env=HOME,TMPDIR,EDITOR,REISHI_CONFIG,REISHI_LOCKFILE',
-      '--allow-net=platform.claude.com,code.claude.com',
+      '--allow-env=HOME,TMPDIR,REISHI_CONFIG,REISHI_LOCKFILE',
+      '--allow-net=github.com,codeload.github.com',
       '--allow-run',
       scriptPath,
       ...args,
@@ -252,7 +252,7 @@ Deno.test('completions: fish outputs valid fish completion script', async () => 
   assertEquals(r.code, 0, `stderr=${r.stderr}`);
   assertStringIncludes(r.stdout, 'complete -c rei');
   // All top-level commands present
-  for (const cmd of ['skills', 'rules', 'docs', 'config', 'sync', 'refresh-docs']) {
+  for (const cmd of ['skills', 'rules', 'docs', 'config', 'sync']) {
     assertStringIncludes(r.stdout, cmd);
   }
 });
@@ -334,7 +334,7 @@ Deno.test('config: show prints TOML with expected keys', async () => {
     });
     assertEquals(r.code, 0, `stderr=${r.stderr}`);
     assertStringIncludes(r.stdout, 'sync_method');
-    assertStringIncludes(r.stdout, '[paths]');
+    assertStringIncludes(r.stdout, '[skills]');
     assertStringIncludes(r.stdout, '[updates]');
   } finally {
     await Deno.remove(configHome, { recursive: true });

@@ -21,7 +21,7 @@ let cached: CachedPaths | null = null;
 async function resolve(): Promise<CachedPaths> {
   if (cached) return cached;
   const config = await loadConfig();
-  const source = expandHome(config.paths.source);
+  const source = expandHome(config.skills.source);
   const rules = expandHome(config.rules.source);
   const docs = expandHome(config.docs.source);
   cached = { source, deactivated: join(source, '_deactivated'), rules, docs };

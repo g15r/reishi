@@ -1,4 +1,4 @@
-#!/usr/bin/env -S deno run --allow-read --allow-write --allow-env=HOME,EDITOR,REISHI_CONFIG,REISHI_LOCKFILE --allow-net=platform.claude.com,code.claude.com,github.com,codeload.github.com --allow-run=tar
+#!/usr/bin/env -S deno run --allow-read --allow-write --allow-env=HOME,REISHI_CONFIG,REISHI_LOCKFILE --allow-net=github.com,codeload.github.com --allow-run=tar
 
 /**
  * reishi - Unified CLI for Claude Agent Skill management
@@ -29,13 +29,11 @@ import {
   loadLockfile,
   saveConfig,
   saveLockfile,
-  type SkillEntry,
   type SkillLockEntry,
 } from './config.ts';
 import { getDeactivatedDir, getSourceDir } from './paths.ts';
 import {
   checkForUpdates,
-  maybeNotifyOfUpdates,
   printStatus,
   printSummary,
   pullAll,
@@ -86,14 +84,6 @@ const TEMPLATES = {
   reference: 'example_reference.md.tmpl',
   asset: 'example_asset.txt.tmpl',
 };
-
-// Anthropic documentation sources
-const DOC_SOURCES = [
-  {
-    url: 'https://code.claude.com/docs/en/skills.md',
-    filename: 'overview.md',
-  },
-];
 
 // ============================================================================
 // Types
@@ -566,59 +556,6 @@ async function validateSkill(skillPath: string): Promise<ValidationResult> {
 }
 
 // ============================================================================
-// Command: refresh-docs
-// ============================================================================
-
-async function refreshDocs(): Promise<boolean> {
-  console.log('Fetching latest Anthropic skill documentation...\n');
-
-  const skillDevDir = join(await getSourceDir(), 'develop-agent-skills');
-
-  try {
-    let successCount = 0;
-
-    // Ensure the target dir exists before writing docs into it.
-    await Deno.mkdir(skillDevDir, { recursive: true });
-
-    for (const source of DOC_SOURCES) {
-      try {
-        console.log(`Fetching ${magenta(source.filename)}...`);
-        const response = await fetch(source.url);
-
-        if (!response.ok) {
-          console.error(
-            `  ${red('❌ Failed')} ${dim(italic(`(${response.status})`))} ${source.url}`,
-          );
-          continue;
-        }
-
-        const content = await response.text();
-        const outputPath = join(skillDevDir, source.filename);
-        await Deno.writeTextFile(outputPath, content);
-        console.log(`  ${green('✅ Saved to')} ${magenta(outputPath)}`);
-        successCount++;
-      } catch (error) {
-        const message = error instanceof Error ? error.message : String(error);
-        console.error(
-          `  ${red('❌ Error fetching')} ${magenta(source.filename)}: ${message}`,
-        );
-      }
-    }
-
-    console.log(
-      `\n${green('✅ Fetched')} ${successCount}/${DOC_SOURCES.length} documents to ${
-        magenta(skillDevDir)
-      }`,
-    );
-    return successCount > 0;
-  } catch (error) {
-    const message = error instanceof Error ? error.message : String(error);
-    console.error(`${red('❌ Error refreshing docs:')} ${message}`);
-    return false;
-  }
-}
-
-// ============================================================================
 // Command: activate / deactivate
 // ============================================================================
 
@@ -1068,7 +1005,7 @@ async function addSkill(
         successCount++;
       } else if (outcome.existed && options.track) {
         const existingConfig = await loadConfig();
-        if (existingConfig.skills?.[installedName]) {
+        if (existingConfig.skill_overrides?.[installedName]) {
           await maybeTrack(installedName, entrySubpath);
           successCount++;
         }
@@ -1138,7 +1075,7 @@ async function configInit(): Promise<boolean> {
 
 async function configShow(): Promise<boolean> {
   try {
-    void maybeNotifyOfUpdates();
+
     const config = await loadConfig();
     const rendered = stringifyTOML(config as unknown as Record<string, unknown>);
     console.log(rendered.trimEnd());
@@ -1178,30 +1115,17 @@ async function promptYesNoCli(question: string, defaultNo = true): Promise<boole
 
 // Show the raw config value (may be `~/...`) to avoid awaiting during CLI
 // setup. The actual resolved path is used at action-time.
-const { paths: { source: configuredSource } } = await loadConfig();
+const REI_VERSION = '0.1.0';
+const { skills: { source: configuredSource } } = await loadConfig();
 
 const cli = new Command()
   .name('rei')
-  .version('0.1.0')
+  .version(`v${REI_VERSION} (source ${configuredSource})`)
   .description('Cross-agent Skill management CLI')
-  .meta('Author', 'winnie [gwenwindflower@gh] + Claude Code')
-  .meta('Docs', 'https://code.claude.com/docs/en/skills')
-  .meta('Templates', TEMPLATE_DIR)
-  .meta('Source of Truth', configuredSource)
   .globalComplete('active-skill', () => getActiveSkillNames())
   .globalComplete('deactivated-skill', () => getDeactivatedSkillNames())
   .globalComplete('rule-name', () => getRuleNames())
   .globalComplete('doc-project', () => getDocProjectNames());
-
-// Refresh-docs command (top-level — fetches Anthropic doc updates)
-cli
-  .command('refresh-docs')
-  .description('Fetch latest Anthropic skill documentation')
-  .example('Update docs', 'rei refresh-docs')
-  .action(async () => {
-    const success = await refreshDocs();
-    Deno.exit(success ? 0 : 1);
-  });
 
 // Skills command (parent for: new, validate, add, list, activate, deactivate,
 // sync, pull, status, updates)
@@ -1242,7 +1166,7 @@ const skillsCommand = new Command()
   .description('Validate skill structure and frontmatter')
   .example('Validate a skill', 'rei skills validate agents/skills/my-skill')
   .action(async (_options, skillPath) => {
-    void maybeNotifyOfUpdates();
+
     const result = await validateSkill(skillPath);
     console.log(result.message);
     Deno.exit(result.valid ? 0 : 1);
@@ -1292,7 +1216,7 @@ const skillsCommand = new Command()
   .example('List active skills', 'rei skills list')
   .example('List all skills', 'rei skills list --all')
   .action(async (options) => {
-    void maybeNotifyOfUpdates();
+
     const success = await listSkills(options.all);
     Deno.exit(success ? 0 : 1);
   })
@@ -1314,29 +1238,35 @@ const skillsCommand = new Command()
   })
   .command('sync [skill-name:string:active-skill]')
   .description('Distribute skills from source to configured targets (local only)')
-  .option('--targets <names:string>', 'Comma-separated target names to sync to')
+  .option('--agents <names:string>', 'Comma-separated agent names to sync to')
   .option('--method <method:string>', 'Override sync method: copy or symlink')
   .option('--dry-run', 'Plan only — do not write')
-  .option(
-    '--prefix-change <mode:string>',
-    'How to handle a changed prefix non-interactively: rename | parallel | abort',
-  )
+  .option('--check', 'Report per skill × target freshness without writing')
   .example('Sync all skills to all targets', 'rei skills sync')
   .example('Sync one skill', 'rei skills sync book-review')
+  .example('Show sync state', 'rei skills sync --check')
   .action(async (options, skillName) => {
+    if (options.check) {
+      const statuses = await syncStatus();
+      printStatus(statuses);
+      Deno.exit(0);
+    }
     const syncOpts = buildSyncOptions(options);
     if (syncOpts === null) Deno.exit(1);
+    // Sync never passes prefix-change — that's a pull-only concern.
+    const { prefixChange: _, ...syncOnly } = syncOpts!;
     const results = skillName
-      ? await syncSkill(skillName, syncOpts!)
-      : await syncAll(syncOpts!);
+      ? await syncSkill(skillName, syncOnly)
+      : await syncAll(syncOnly);
     printSummary(results);
     Deno.exit(results.some((r) => r.action === 'failed') ? 1 : 0);
   })
   .command('pull [skill-name:string:active-skill]')
   .description('Fetch upstream for tracked skills, then auto-sync to targets')
-  .option('--targets <names:string>', 'Comma-separated target names to sync to')
+  .option('--agents <names:string>', 'Comma-separated agent names to sync to')
   .option('--method <method:string>', 'Override sync method: copy or symlink')
   .option('--dry-run', 'Preview upstream diff without writing (no sync either)')
+  .option('--check', 'Check for upstream changes without fetching')
   .option(
     '--prefix-change <mode:string>',
     'How to handle a changed prefix non-interactively: rename | parallel | abort',
@@ -1344,7 +1274,28 @@ const skillsCommand = new Command()
   .example('Pull all tracked skills', 'rei skills pull')
   .example('Pull one skill', 'rei skills pull book-review')
   .example('Preview upstream changes', 'rei skills pull --dry-run')
+  .example('Check for upstream updates', 'rei skills pull --check')
   .action(async (options, skillName) => {
+    if (options.check) {
+      const checks = await checkForUpdates(skillName);
+      const updated = checks.filter((c) => c.hasUpdate).map((c) => c.skillName);
+      const skipped = checks.filter((c) => c.skipped);
+
+      if (updated.length === 0) {
+        console.log(`${green('✨ Up to date')} ${dim(italic(`(${checks.length} checked)`))}`);
+      } else {
+        const noun = updated.length === 1 ? 'skill has' : 'skills have';
+        console.log(
+          `${green('✨')} ${updated.length} ${noun} upstream updates: ${
+            updated.map((n) => magenta(n)).join(', ')
+          }`,
+        );
+      }
+      for (const s of skipped) {
+        console.log(`  ${dim(italic(`skipped ${s.skillName}: ${s.reason}`))}`);
+      }
+      Deno.exit(0);
+    }
     const pullOpts = buildSyncOptions(options) as PullOptions | null;
     if (pullOpts === null) Deno.exit(1);
     const results = skillName
@@ -1355,60 +1306,18 @@ const skillsCommand = new Command()
       r.fetch.aborted || r.sync.some((s) => s.action === 'failed')
     );
     Deno.exit(anyFail ? 1 : 0);
-  })
-  .command('status')
-  .description('Report per skill × target freshness (local only, no network)')
-  .example('Show sync state', 'rei skills status')
-  .action(async () => {
-    const statuses = await syncStatus();
-    printStatus(statuses);
-    Deno.exit(0);
-  })
-  .command('updates [skill-name:string:active-skill]')
-  .description('Check tracked skills for upstream changes')
-  .option('--pull', 'Also pull any skills with detected upstream changes')
-  .example('Check all tracked skills', 'rei skills updates')
-  .example('Check and pull', 'rei skills updates --pull')
-  .action(async (options, skillName) => {
-    const checks = await checkForUpdates(skillName);
-    const updated = checks.filter((c) => c.hasUpdate).map((c) => c.skillName);
-    const skipped = checks.filter((c) => c.skipped);
-
-    if (updated.length === 0) {
-      console.log(`${green('✨ Up to date')} ${dim(italic(`(${checks.length} checked)`))}`);
-    } else {
-      const noun = updated.length === 1 ? 'skill has' : 'skills have';
-      console.log(
-        `${green('✨')} ${updated.length} ${noun} upstream updates: ${
-          updated.map((n) => magenta(n)).join(', ')
-        }`,
-      );
-    }
-    for (const s of skipped) {
-      console.log(`  ${dim(italic(`skipped ${s.skillName}: ${s.reason}`))}`);
-    }
-
-    if (options.pull && updated.length > 0) {
-      const pullResults: PullSkillResult[] = [];
-      for (const name of updated) {
-        pullResults.push(await pullSkill(name));
-      }
-      printPullSummary(pullResults);
-    }
-
-    Deno.exit(0);
   });
 
 cli.command('skills', skillsCommand);
 
 /**
- * Parse the shared sync/pull flag set (method/targets/dry-run/force/
+ * Parse the shared sync/pull flag set (method/agents/dry-run/
  * prefix-change). Returns null after printing an error message when a flag
  * value is malformed. Callers pass the same options object they get from
  * Cliffy; unknown fields are ignored.
  */
 function buildSyncOptions(options: {
-  targets?: string;
+  agents?: string;
   method?: string;
   dryRun?: boolean;
   prefixChange?: string;
@@ -1437,11 +1346,11 @@ function buildSyncOptions(options: {
       return null;
     }
   }
-  const targets = options.targets
-    ? options.targets.split(',').map((t) => t.trim()).filter((t) => t.length > 0)
+  const agents = options.agents
+    ? options.agents.split(',').map((t) => t.trim()).filter((t) => t.length > 0)
     : undefined;
   return {
-    targets,
+    agents,
     method,
     dryRun: options.dryRun,
     prefixChange,
@@ -1506,30 +1415,27 @@ cli.command('config', configCommand);
 cli
   .command('sync')
   .description('Sync skills, rules, and docs from source to targets (local only)')
-  .option('--targets <names:string>', 'Comma-separated target names to sync to')
+  .option('--agents <names:string>', 'Comma-separated agent names to sync to')
   .option('--method <method:string>', 'Override sync method: copy or symlink')
   .option('--dry-run', 'Plan only — do not write')
-  .option(
-    '--prefix-change <mode:string>',
-    'How to handle a changed prefix non-interactively: rename | parallel | abort',
-  )
   .example('Sync everything', 'rei sync')
-  .example('Sync to a subset of targets', 'rei sync --targets=claude,agents')
+  .example('Sync to a subset of agents', 'rei sync --agents=claude')
   .action(async (options) => {
-    void maybeNotifyOfUpdates();
+
     const syncOpts = buildSyncOptions(options);
     if (syncOpts === null) Deno.exit(1);
-    const targets = syncOpts!.targets;
-    const method = syncOpts!.method;
+    const { prefixChange: _, ...syncOnly } = syncOpts!;
+    const agents = syncOnly.agents;
+    const method = syncOnly.method;
 
-    const skillResults = await syncAll(syncOpts!);
+    const skillResults = await syncAll(syncOnly);
     const ruleResults = await syncRules({
-      targets,
+      agents,
       method,
       dryRun: options.dryRun,
     });
     const config = await loadConfig();
-    const docsProjects = config.docs.projects ?? {};
+    const docsProjects = config.projects ?? {};
     const docsRuns = Object.keys(docsProjects).length > 0
       ? await syncDocs({ method, dryRun: options.dryRun })
       : [];
@@ -1616,26 +1522,16 @@ const rulesCommand = new Command()
     Deno.exit(0);
   })
   .command('sync')
-  .description('Sync rules from source to configured targets')
-  .option('--targets <names:string>', 'Comma-separated target names to sync to')
+  .description('Sync rules from source to configured agent targets')
+  .option('--agents <names:string>', 'Comma-separated agent names to sync to')
   .option('--method <method:string>', 'Override sync method: copy or symlink')
   .option('--dry-run', 'Plan only — do not write')
-  .example('Sync all rules to all targets', 'rei rules sync')
-  .example('Sync to one target', 'rei rules sync --targets=claude')
+  .example('Sync all rules to all agents', 'rei rules sync')
+  .example('Sync to one agent', 'rei rules sync --agents=claude')
   .action(async (options) => {
-    let method: 'copy' | 'symlink' | undefined;
-    if (options.method) {
-      if (options.method === 'copy' || options.method === 'symlink') {
-        method = options.method;
-      } else {
-        console.error(`${red('❌ Error:')} --method must be 'copy' or 'symlink'`);
-        Deno.exit(1);
-      }
-    }
-    const targets = options.targets
-      ? options.targets.split(',').map((t) => t.trim()).filter((t) => t.length > 0)
-      : undefined;
-    const results = await syncRules({ targets, method, dryRun: options.dryRun });
+    const syncOpts = buildSyncOptions(options);
+    if (syncOpts === null) Deno.exit(1);
+    const results = await syncRules({ agents: syncOpts!.agents, method: syncOpts!.method, dryRun: syncOpts!.dryRun });
     printRulesSummary(results);
     const failed = results.some((r) => r.action === 'failed');
     Deno.exit(failed ? 1 : 0);
@@ -1706,7 +1602,7 @@ const docsCommand = new Command()
       );
       if (!options.target) {
         console.log(
-          `   ${dim(italic('Tip: set'))} [docs.projects.${project}].target ${
+          `   ${dim(italic('Tip: set'))} [projects.${project}].path ${
             dim(italic('in config.toml to enable sync'))
           }`,
         );

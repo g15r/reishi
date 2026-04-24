@@ -1,5 +1,51 @@
 # Completed Work Log
 
+## Phase 8: Naming Clarity, Cross-Domain Consistency, and Cleanup ✅
+
+Unified the CLI vocabulary across all three domains (skills, rules, docs). Introduced **agents** (named destinations grouping skills + rules paths) and **projects** (named destinations for docs) as first-class config concepts. Folded standalone inspection commands into `--check` flags. Removed dead code and vestigial permissions.
+
+### Config restructure and shared types
+
+- [x] Replaced `PathsConfig` with `SkillsConfig { source }` — skills source now at `[skills].source`
+- [x] Replaced `[paths.targets]` and `[rules.targets]` with `[agents.<name>]` tables, each containing `skills` and `rules` path keys
+- [x] Renamed `DocsProjectEntry.target` to `DocsProjectEntry.path`
+- [x] Promoted `[docs.projects.*]` to top-level `[projects.*]` tables
+- [x] Per-skill `SkillEntry.targets` became `SkillEntry.agents`; per-skill overrides moved to `[skill_overrides.<name>]`
+- [x] Defined base types: `SyncTarget`, `AgentTarget`, `ProjectTarget`, `BaseSyncOptions`
+- [x] Updated all config consumers: `syncSkill`, `syncAll`, `syncRules`, `syncDocs`, `pullSkill`, `pullAll`, `checkForUpdates`, `syncStatus`, `renameSkillEverywhere`
+- [x] Updated `defaultConfig()`, `STARTER_TEMPLATE`, `initConfig()` for new structure
+- [x] Updated `paths.ts` to read `config.skills.source`
+- [x] Added `resolveSkillTargets` and `resolveRuleTargets` (replacing the unified `resolveTargets`) to extract per-domain paths from agent configs
+- [x] Rules sync now uses `buildSyncOptions` instead of inline flag parsing (DRY)
+
+### CLI flag rename
+
+- [x] `--targets` → `--agents` on `rei skills sync`, `rei skills pull`, `rei rules sync`, `rei sync`
+- [x] `buildSyncOptions` parses `--agents` instead of `--targets`
+
+### Fold status and updates into --check
+
+- [x] Added `--check` flag to `rei skills sync` — runs `syncStatus()` without writing
+- [x] Added `--check` flag to `rei skills pull` — runs `checkForUpdates()` without fetching
+- [x] Removed `rei skills status` and `rei skills updates` subcommands
+- [x] Removed `maybeNotifyOfUpdates` fire-and-forget calls from `list`, `config show`, `validate`
+
+### Remove --prefix-change from sync
+
+- [x] Removed `--prefix-change` from `rei skills sync` and `rei sync` (kept on `pull`)
+- [x] Sync handlers strip `prefixChange` before forwarding to sync functions
+
+### Remove refresh-docs and dead permissions
+
+- [x] Removed `refreshDocs()`, `DOC_SOURCES`, and the `refresh-docs` CLI command
+- [x] Removed `code.claude.com`, `platform.claude.com` from `--allow-net` (shebang, deno.json, compile-all.sh)
+- [x] Removed `EDITOR` from `--allow-env` (shebang, deno.json, compile-all.sh, test env strings)
+
+### AGENTS.md and tests
+
+- [x] Updated AGENTS.md: command structure, config schema, core concepts, examples
+- [x] Updated all 11 test files for new config structure and flag names
+
 ## Phase 7: Command Restructure, Sync/Pull Split, and Lockfile ✅
 
 ### Dead code cleanup
