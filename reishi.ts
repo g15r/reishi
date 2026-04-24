@@ -1337,7 +1337,6 @@ const skillsCommand = new Command()
   .option('--targets <names:string>', 'Comma-separated target names to sync to')
   .option('--method <method:string>', 'Override sync method: copy or symlink')
   .option('--dry-run', 'Preview upstream diff without writing (no sync either)')
-  .option('--force', 'Overwrite local modifications without prompting')
   .option(
     '--prefix-change <mode:string>',
     'How to handle a changed prefix non-interactively: rename | parallel | abort',
@@ -1412,7 +1411,6 @@ function buildSyncOptions(options: {
   targets?: string;
   method?: string;
   dryRun?: boolean;
-  force?: boolean;
   prefixChange?: string;
 }): SyncOptions | null {
   let method: 'copy' | 'symlink' | undefined;
@@ -1446,7 +1444,6 @@ function buildSyncOptions(options: {
     targets,
     method,
     dryRun: options.dryRun,
-    force: options.force,
     prefixChange,
   };
 }

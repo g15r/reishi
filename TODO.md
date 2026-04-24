@@ -6,20 +6,6 @@ Overhaul of the first-pass v1 work: introduce a lockfile to separate config from
 
 The objectives below are mostly sequential — later work reads state written by earlier work, so treat this as a single-agent pass rather than a parallelizable phase. Conceptual model lives in `AGENTS.md`; implementation needs to catch up to it.
 
-### Divergence protection
-
-When pulling upstream content, protect locally modified files automatically. No prompts; pull is always safe.
-
-- [ ] Per-file divergence check: compare file mtime against lockfile `synced_at`
-- [ ] Unchanged files (mtime <= `synced_at`): overwrite with upstream version
-- [ ] Diverged files (mtime > `synced_at`): keep user's version in place, write upstream version as `<name>_1.md` (or `_2`, `_3`, ...)
-- [ ] Suffix incrementing: scan for existing `_N` files and pick the next available number
-- [ ] Print a summary of protected files after pull so user knows what to review
-- [ ] Remove the `--force` flag and the local-modification `promptYesNo` path entirely
-- [ ] Remove `promptYesNo` / `promptChoice` from `SyncOptions` (no longer needed there)
-- [ ] Keep injectable prompts for the prefix-change flow only (still interactive)
-- [ ] Tests: unchanged files overwritten, diverged files preserved with suffix, suffix increments correctly, summary printed
-
 ### Simplify status
 
 `rei skills status` becomes purely local — no network. Upstream-change reporting lives in `rei skills pull --dry-run` and `rei skills updates`.

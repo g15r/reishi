@@ -10,7 +10,7 @@
  * targets from `[paths.targets]` this skill is distributed to.
  */
 
-import { dirname, join, resolve } from '@std/path';
+import { dirname, extname, join, resolve } from '@std/path';
 import { copy, exists } from '@std/fs';
 import { dim, green, italic, magenta, red, yellow } from '@std/fmt/colors';
 import {
@@ -42,13 +42,11 @@ export interface SyncOptions {
   method?: SyncMethod;
   /** Plan only — no writes. */
   dryRun?: boolean;
-  /** Bypass local-modification confirmation prompt. */
-  force?: boolean;
   /** Pre-decide prefix-change behavior in non-interactive flows. */
   prefixChange?: 'rename' | 'parallel' | 'abort';
-  /** Injectable yes/no prompt for tests; defaults to terminal stdin. */
+  /** Injectable yes/no prompt for the prefix-change confirmation. */
   promptYesNo?: PromptYesNo;
-  /** Injectable choice prompt for tests; defaults to terminal stdin. */
+  /** Injectable choice prompt for the prefix-change mode selection. */
   promptChoice?: PromptChoice;
 }
 
@@ -569,6 +567,11 @@ export interface FetchUpstreamResult {
   fetched: boolean;
   changed: boolean;
   diff: FileDiff;
+  /**
+   * Files where the local version diverged and the upstream version was
+   * saved under a `_N` suffix. Empty on clean overwrites and dry-runs.
+   */
+  protected?: ProtectedFile[];
   /** Set when the user (or automation) aborted the operation. */
   aborted?: boolean;
   reason?: string;
@@ -827,34 +830,6 @@ async function fetchUpstreamForSkill(
     return { fetched: true, changed: false, diff: emptyDiff };
   }
 
-  // Local-modification detection: if any file's mtime is newer than the
-  // last recorded synced_at, the user has likely edited the skill in place.
-  if (await exists(skillDir)) {
-    const newest = await newestFileMtime(skillDir);
-    const synced = entry.synced_at ? Date.parse(entry.synced_at) : 0;
-    if (newest > 0 && synced > 0 && newest > synced) {
-      const askYesNo = options.promptYesNo ?? promptYesNo;
-      const acceptable = options.force === true ||
-        await askYesNo(
-          `Local modifications in ${skillName}. Overwrite? (y/N)`,
-        );
-      if (!acceptable) {
-        const interactive = options.promptYesNo !== undefined || Deno.stdin.isTerminal();
-        const reason = interactive
-          ? 'declined overwrite of local modifications'
-          : 'local modifications detected (rerun with --force to override)';
-        console.error(`${red('❌')} ${reason} for ${magenta(skillName)}`);
-        return {
-          fetched: false,
-          changed: false,
-          diff: emptyDiff,
-          aborted: true,
-          reason,
-        };
-      }
-    }
-  }
-
   let extracted: { extractedRoot: string; cleanup: () => Promise<void> };
   try {
     extracted = await downloadAndExtract(entry, fetcher);
@@ -883,15 +858,10 @@ async function fetchUpstreamForSkill(
       return { fetched: true, changed, diff };
     }
 
-    if (changed) {
-      // Replace the source dir atomically: stage the new tree alongside, then swap.
-      const staging = `${skillDir}.reishi-staging-${Date.now()}`;
-      await copy(extracted.extractedRoot, staging, { overwrite: true });
-      if (await exists(skillDir)) {
-        await Deno.remove(skillDir, { recursive: true });
-      }
-      await Deno.rename(staging, skillDir);
-    }
+    const syncedAtMs = entry.synced_at ? Date.parse(entry.synced_at) : 0;
+    const merge = changed
+      ? await mergeUpstreamIntoSource(skillDir, extracted.extractedRoot, syncedAtMs)
+      : { overwritten: [], added: [], removed: [], protected: [] } as MergeResult;
 
     // Update sha + synced_at after a successful pull so the next run's SHA
     // probe can short-circuit. Only write the lockfile when something actually
@@ -912,15 +882,158 @@ async function fetchUpstreamForSkill(
       console.log(
         `${green('🌐 Fetched')} ${magenta(skillName)} ${dim(italic(`(${summarizeDiff(diff)})`))}`,
       );
+      if (merge.protected.length > 0) {
+        const noun = merge.protected.length === 1 ? 'file' : 'files';
+        console.log(
+          `   ${yellow('🛡  Protected')} ${merge.protected.length} locally-modified ${noun}:`,
+        );
+        for (const p of merge.protected) {
+          console.log(
+            `     ${magenta(p.original)} ${dim(italic('→ upstream saved as'))} ${magenta(p.savedAs)}`,
+          );
+        }
+      }
     } else {
       console.log(
         `${dim(italic('Up-to-date:'))} ${magenta(skillName)}`,
       );
     }
-    return { fetched: true, changed, diff };
+    return { fetched: true, changed, diff, protected: merge.protected };
   } finally {
     await extracted.cleanup();
   }
+}
+
+// ============================================================================
+// Per-file merge with divergence protection
+// ============================================================================
+
+export interface ProtectedFile {
+  /** Relative path of the file that kept the user's local version. */
+  original: string;
+  /** Relative path where the upstream version was saved (e.g. `foo_1.md`). */
+  savedAs: string;
+}
+
+interface MergeResult {
+  /** Files where the upstream version was written over an unchanged local. */
+  overwritten: string[];
+  /** Files that didn't exist locally and were copied in from upstream. */
+  added: string[];
+  /** Files present locally but not in upstream, removed as unchanged. */
+  removed: string[];
+  /** Files where local was diverged — upstream saved under a `_N` suffix. */
+  protected: ProtectedFile[];
+}
+
+/**
+ * Walk a directory and return every file's path relative to `root`. Skips
+ * directories (they're not tracked — we care about file-level merges).
+ */
+async function walkFiles(root: string): Promise<string[]> {
+  const out: string[] = [];
+  if (!(await exists(root))) return out;
+  const walk = async (dir: string, prefix: string): Promise<void> => {
+    for await (const entry of Deno.readDir(dir)) {
+      const abs = join(dir, entry.name);
+      const rel = prefix ? `${prefix}/${entry.name}` : entry.name;
+      if (entry.isDirectory) await walk(abs, rel);
+      else if (entry.isFile) out.push(rel);
+    }
+  };
+  await walk(root, '');
+  return out;
+}
+
+/**
+ * Pick the next available `<stem>_<N><ext>` name under `root/dir` that isn't
+ * already taken. E.g. `SKILL.md` → `SKILL_1.md`; if that's taken, `SKILL_2.md`.
+ */
+async function nextSuffixedName(root: string, rel: string): Promise<string> {
+  const dir = dirname(rel);
+  const base = rel.slice(dir === '.' ? 0 : dir.length + 1);
+  const ext = extname(base);
+  const stem = ext ? base.slice(0, -ext.length) : base;
+  for (let n = 1; n < 1000; n++) {
+    const candidate = dir === '.'
+      ? `${stem}_${n}${ext}`
+      : `${dir}/${stem}_${n}${ext}`;
+    if (!(await exists(join(root, candidate)))) return candidate;
+  }
+  // Extremely unlikely — suffix collision beyond 1000.
+  throw new Error(`cannot pick a _N suffix for ${rel} under ${root}`);
+}
+
+/**
+ * Merge upstream files into `skillDir` with divergence protection.
+ *
+ * - Files unchanged locally since `syncedAtMs` are overwritten with upstream.
+ * - Files edited locally (mtime > syncedAtMs) are preserved; the upstream
+ *   version lands under a `_N` suffix so the user can diff and resolve.
+ * - Upstream-deleted files are removed if local is still unchanged; kept if
+ *   the user has touched them since the last sync.
+ */
+async function mergeUpstreamIntoSource(
+  skillDir: string,
+  upstreamDir: string,
+  syncedAtMs: number,
+): Promise<MergeResult> {
+  const result: MergeResult = {
+    overwritten: [],
+    added: [],
+    removed: [],
+    protected: [],
+  };
+
+  await Deno.mkdir(skillDir, { recursive: true });
+
+  const upstreamFiles = await walkFiles(upstreamDir);
+  const upstreamSet = new Set(upstreamFiles);
+  const localFiles = await walkFiles(skillDir);
+
+  for (const rel of upstreamFiles) {
+    const upstreamPath = join(upstreamDir, rel);
+    const localPath = join(skillDir, rel);
+    const hasLocal = await exists(localPath);
+    if (!hasLocal) {
+      await Deno.mkdir(dirname(localPath), { recursive: true });
+      await copy(upstreamPath, localPath, { overwrite: true });
+      result.added.push(rel);
+      continue;
+    }
+    const stat = await Deno.stat(localPath);
+    const localMtime = stat.mtime?.getTime() ?? 0;
+    if (syncedAtMs === 0 || localMtime <= syncedAtMs) {
+      await copy(upstreamPath, localPath, { overwrite: true });
+      result.overwritten.push(rel);
+    } else {
+      const suffixed = await nextSuffixedName(skillDir, rel);
+      const suffixedPath = join(skillDir, suffixed);
+      await Deno.mkdir(dirname(suffixedPath), { recursive: true });
+      await copy(upstreamPath, suffixedPath, { overwrite: true });
+      result.protected.push({ original: rel, savedAs: suffixed });
+    }
+  }
+
+  for (const rel of localFiles) {
+    if (upstreamSet.has(rel)) continue;
+    // Ignore `_N`-suffixed files we produced ourselves — they're user-facing
+    // artifacts, not user-created content, so don't reconsider them here.
+    const base = rel.slice(rel.lastIndexOf('/') + 1);
+    const ext = extname(base);
+    const stem = ext ? base.slice(0, -ext.length) : base;
+    if (/_\d+$/.test(stem)) continue;
+
+    const localPath = join(skillDir, rel);
+    const stat = await Deno.stat(localPath);
+    const localMtime = stat.mtime?.getTime() ?? 0;
+    if (syncedAtMs > 0 && localMtime <= syncedAtMs) {
+      await Deno.remove(localPath);
+      result.removed.push(rel);
+    }
+  }
+
+  return result;
 }
 
 // ============================================================================

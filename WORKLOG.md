@@ -2,6 +2,22 @@
 
 ## Phase 7: Command Restructure, Sync/Pull Split, and Lockfile 🌀
 
+### Divergence protection
+
+Replaced the prompt-driven local-modification check with an automatic per-file merge. Pull is now always safe: locally-edited files are preserved in place, and the upstream version is saved under a `_N` suffix so the user can diff and resolve at their leisure.
+
+- [x] Added `mergeUpstreamIntoSource(skillDir, upstreamDir, syncedAtMs)` in `sync.ts` that walks both trees and merges file-by-file
+- [x] Unchanged files (`mtime <= synced_at`) are overwritten with upstream; diverged files (`mtime > synced_at`) are preserved and the upstream version is saved as `<stem>_<N><ext>` (e.g. `SKILL.md` → `SKILL_1.md`, then `_2`, `_3`, ...)
+- [x] Upstream-deleted files are removed locally when the user hasn't touched them since `synced_at`; kept otherwise
+- [x] `_N`-suffixed files themselves are not reconsidered for removal — they're user-facing artifacts, not user-created content
+- [x] Added `nextSuffixedName(root, rel)` helper that scans for the next free `_N` number (up to 1000) before writing
+- [x] Removed the local-modification prompt + `--force` flag; `force` dropped from `SyncOptions`; `--force` dropped from the CLI `skills pull` command and from `buildSyncOptions`
+- [x] `promptYesNo` / `promptChoice` stay on `SyncOptions` — they're still used by the prefix-change flow, which keeps its interactive semantics
+- [x] Pull prints a `🛡  Protected N locally-modified files:` summary with `original → upstream saved as savedAs` lines
+- [x] `FetchUpstreamResult` gained an optional `protected: ProtectedFile[]` field so callers (and tests) can inspect what was preserved
+- [x] Replaced the old `staging dir + atomic rename over skillDir` approach with the per-file merge (no more staging artifacts left on failure)
+- [x] Tests: added `pull (diverged file): protects local, saves upstream as _1`, `pull (unchanged files): overwrites cleanly with upstream`, and `pull (multiple pulls over diverged files): suffix increments _1, _2, _3`; removed the four obsolete local-mod prompt/force tests
+
 ### SHA-based upstream freshness
 
 `pullSkill` now probes the GitHub commits API for the remote HEAD SHA before downloading. When the lockfile's `sha` matches, the tarball fetch is skipped entirely. When it doesn't (or lockfile has no sha yet), the download runs and both `sha` and `synced_at` get written back on success.

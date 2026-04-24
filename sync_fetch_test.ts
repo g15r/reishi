@@ -52,6 +52,23 @@ async function writeLockfile(
   await Deno.writeTextFile(path, stringifyTOML(patch as unknown as Record<string, unknown>));
 }
 
+/** Fetcher that dispatches GitHub-like URLs: commits API → JSON {sha}, tarball → bytes. */
+function shaAwareFetcher(tarballPath: string, sha: string) {
+  return async (url: string): Promise<Response> => {
+    if (url.includes('/commits/')) {
+      return new Response(JSON.stringify({ sha }), {
+        status: 200,
+        headers: { 'content-type': 'application/json' },
+      });
+    }
+    const bytes = await Deno.readFile(tarballPath);
+    return new Response(bytes, {
+      status: 200,
+      headers: { 'content-type': 'application/gzip' },
+    });
+  };
+}
+
 async function seedSkill(sourceDir: string, name: string): Promise<string> {
   const dir = join(sourceDir, name);
   await Deno.mkdir(join(dir, 'scripts'), { recursive: true });
@@ -223,13 +240,14 @@ Deno.test('pull (--dry-run): no source write, no synced_at advance', async () =>
   }
 });
 
-Deno.test('sync (local mods, no force): aborts with informative reason', async () => {
+Deno.test('pull (diverged file): protects local, saves upstream as _1', async () => {
   const env = await setupIsolatedEnv();
   const tarball = await makeFixtureTarball('single-skill-repo');
   try {
     await withEnv(env.env, async () => {
       await seedSkill(env.sourceDir, 'single-skill-repo');
-      // synced_at is OLDER than mtime — the source files look "locally modified".
+      // synced_at is OLDER than the seed mtime → SKILL.md and scripts/run.sh
+      // are both "locally modified".
       await writeLockfile(env.lockfilePath, {
         skills: {
           'single-skill-repo': {
@@ -240,23 +258,32 @@ Deno.test('sync (local mods, no force): aborts with informative reason', async (
           },
         },
       });
+      await Deno.mkdir(join(env.home, '.claude', 'skills'), { recursive: true });
 
-      // Inject a declining prompt to avoid hanging when stdin is a terminal
-      // (e.g. running `deno task test` from an interactive shell).
       const result = await pullSkill('single-skill-repo', {
         fetcher: fakeFetchGithub(tarball),
-        promptYesNo: async () => false,
       });
-      // Declined => fetch aborted with the local-mod reason.
-      assert(
-        result.fetch.aborted && (result.fetch.reason ?? '').includes('declined'),
-        `expected declined-abort reason, got: ${result.fetch.reason}`,
-      );
-      // Source untouched — still has the old "stale" description.
+
+      // Local SKILL.md is preserved verbatim.
       const src = await Deno.readTextFile(
         join(env.sourceDir, 'single-skill-repo', 'SKILL.md'),
       );
-      assert(src.includes('description: stale'));
+      assert(src.includes('description: stale'), 'local SKILL.md should be preserved');
+      // Upstream SKILL.md lands under _1.
+      assert(
+        await exists(join(env.sourceDir, 'single-skill-repo', 'SKILL_1.md')),
+        'upstream SKILL.md should be saved as SKILL_1.md',
+      );
+      const upstreamContent = await Deno.readTextFile(
+        join(env.sourceDir, 'single-skill-repo', 'SKILL_1.md'),
+      );
+      assert(upstreamContent.includes('A test fixture skill'));
+      // The protected list in the result surfaces it.
+      const protectedFiles = result.fetch.protected ?? [];
+      assert(
+        protectedFiles.some((p) => p.original === 'SKILL.md' && p.savedAs === 'SKILL_1.md'),
+        `expected SKILL.md to be in protected list; got ${JSON.stringify(protectedFiles)}`,
+      );
     });
   } finally {
     try {
@@ -266,7 +293,62 @@ Deno.test('sync (local mods, no force): aborts with informative reason', async (
   }
 });
 
-Deno.test('sync (local mods, --force): proceeds and overwrites source', async () => {
+Deno.test('pull (unchanged files): overwrites cleanly with upstream', async () => {
+  const env = await setupIsolatedEnv();
+  const tarball = await makeFixtureTarball('single-skill-repo');
+  try {
+    await withEnv(env.env, async () => {
+      await seedSkill(env.sourceDir, 'single-skill-repo');
+      // Back-date seed files so they look unchanged relative to synced_at.
+      const oldMtime = new Date(Date.now() - 600_000);
+      await Deno.utime(
+        join(env.sourceDir, 'single-skill-repo', 'SKILL.md'),
+        oldMtime,
+        oldMtime,
+      );
+      await Deno.utime(
+        join(env.sourceDir, 'single-skill-repo', 'scripts', 'run.sh'),
+        oldMtime,
+        oldMtime,
+      );
+      await writeLockfile(env.lockfilePath, {
+        skills: {
+          'single-skill-repo': {
+            source_url: 'https://github.com/fakeuser/single-skill-repo',
+            subpath: '',
+            ref: 'main',
+            synced_at: new Date(Date.now() - 5_000).toISOString(),
+          },
+        },
+      });
+      await Deno.mkdir(join(env.home, '.claude', 'skills'), { recursive: true });
+
+      const result = await pullSkill('single-skill-repo', {
+        fetcher: fakeFetchGithub(tarball),
+      });
+
+      // SKILL.md overwritten with upstream.
+      const src = await Deno.readTextFile(
+        join(env.sourceDir, 'single-skill-repo', 'SKILL.md'),
+      );
+      assert(src.includes('A test fixture skill'));
+      // No _N suffix created.
+      assert(
+        !(await exists(join(env.sourceDir, 'single-skill-repo', 'SKILL_1.md'))),
+        'should not create _N suffix for an unchanged file',
+      );
+      // protected list is empty for the clean path.
+      assertEquals(result.fetch.protected?.length ?? 0, 0);
+    });
+  } finally {
+    try {
+      await Deno.remove(tarball);
+    } catch { /* ignore */ }
+    await env.cleanup();
+  }
+});
+
+Deno.test('pull (multiple pulls over diverged files): suffix increments _1, _2, _3', async () => {
   const env = await setupIsolatedEnv();
   const tarball = await makeFixtureTarball('single-skill-repo');
   try {
@@ -284,14 +366,36 @@ Deno.test('sync (local mods, --force): proceeds and overwrites source', async ()
       });
       await Deno.mkdir(join(env.home, '.claude', 'skills'), { recursive: true });
 
+      // First pull: one SHA, creates SKILL_1.md.
       await pullSkill('single-skill-repo', {
-        force: true,
-        fetcher: fakeFetchGithub(tarball),
+        fetcher: shaAwareFetcher(tarball, 'sha-a'),
       });
-      const src = await Deno.readTextFile(
-        join(env.sourceDir, 'single-skill-repo', 'SKILL.md'),
-      );
-      assert(src.includes('A test fixture skill'), 'source should now contain upstream content');
+      assert(await exists(join(env.sourceDir, 'single-skill-repo', 'SKILL_1.md')));
+
+      // Touch local SKILL.md (with a fresh "now" each time) so it stays
+      // "diverged" relative to each subsequent pull's synced_at.
+      const bumpMtime = async () => {
+        const t = new Date();
+        await Deno.utime(
+          join(env.sourceDir, 'single-skill-repo', 'SKILL.md'),
+          t,
+          t,
+        );
+      };
+
+      await bumpMtime();
+      await pullSkill('single-skill-repo', {
+        fetcher: shaAwareFetcher(tarball, 'sha-b'),
+      });
+      assert(await exists(join(env.sourceDir, 'single-skill-repo', 'SKILL_2.md')));
+
+      // Third pull, third SHA: SKILL_3.md.
+      await new Promise((r) => setTimeout(r, 5));
+      await bumpMtime();
+      await pullSkill('single-skill-repo', {
+        fetcher: shaAwareFetcher(tarball, 'sha-c'),
+      });
+      assert(await exists(join(env.sourceDir, 'single-skill-repo', 'SKILL_3.md')));
     });
   } finally {
     try {
@@ -346,100 +450,6 @@ Deno.test('sync (multi-skill repo): only the requested skill is synced from the 
     await env.cleanup();
   }
 });
-
-Deno.test('sync (local mods, prompt accepts): proceeds like --force', async () => {
-  const env = await setupIsolatedEnv();
-  const tarball = await makeFixtureTarball('single-skill-repo');
-  try {
-    await withEnv(env.env, async () => {
-      await seedSkill(env.sourceDir, 'single-skill-repo');
-      await writeLockfile(env.lockfilePath, {
-        skills: {
-          'single-skill-repo': {
-            source_url: 'https://github.com/fakeuser/single-skill-repo',
-            subpath: '',
-            ref: 'main',
-            synced_at: new Date(Date.now() - 300_000).toISOString(),
-          },
-        },
-      });
-      await Deno.mkdir(join(env.home, '.claude', 'skills'), { recursive: true });
-
-      const result = await pullSkill('single-skill-repo', {
-        fetcher: fakeFetchGithub(tarball),
-        promptYesNo: async () => true,
-      });
-      // Prompt accepted → fetch proceeded → source overwritten.
-      const src = await Deno.readTextFile(
-        join(env.sourceDir, 'single-skill-repo', 'SKILL.md'),
-      );
-      assert(src.includes('A test fixture skill'), 'source should contain upstream content');
-      assert(result.sync.some((r) => r.action === 'copied' || r.action === 'symlinked'));
-    });
-  } finally {
-    try {
-      await Deno.remove(tarball);
-    } catch { /* ignore */ }
-    await env.cleanup();
-  }
-});
-
-Deno.test('sync (local mods, prompt declines): aborts with declined reason', async () => {
-  const env = await setupIsolatedEnv();
-  const tarball = await makeFixtureTarball('single-skill-repo');
-  try {
-    await withEnv(env.env, async () => {
-      await seedSkill(env.sourceDir, 'single-skill-repo');
-      await writeLockfile(env.lockfilePath, {
-        skills: {
-          'single-skill-repo': {
-            source_url: 'https://github.com/fakeuser/single-skill-repo',
-            subpath: '',
-            ref: 'main',
-            synced_at: new Date(Date.now() - 300_000).toISOString(),
-          },
-        },
-      });
-
-      const result = await pullSkill('single-skill-repo', {
-        fetcher: fakeFetchGithub(tarball),
-        promptYesNo: async () => false,
-      });
-      // Prompt declined → fetch aborted with "declined" wording.
-      assert(
-        result.fetch.aborted && (result.fetch.reason ?? '').includes('declined'),
-        `expected declined-abort reason, got: ${result.fetch.reason}`,
-      );
-      // Source untouched.
-      const src = await Deno.readTextFile(
-        join(env.sourceDir, 'single-skill-repo', 'SKILL.md'),
-      );
-      assert(src.includes('description: stale'));
-    });
-  } finally {
-    try {
-      await Deno.remove(tarball);
-    } catch { /* ignore */ }
-    await env.cleanup();
-  }
-});
-
-/** Fetcher that dispatches GitHub-like URLs: commits API → JSON {sha}, tarball → bytes. */
-function shaAwareFetcher(tarballPath: string, sha: string) {
-  return async (url: string): Promise<Response> => {
-    if (url.includes('/commits/')) {
-      return new Response(JSON.stringify({ sha }), {
-        status: 200,
-        headers: { 'content-type': 'application/json' },
-      });
-    }
-    const bytes = await Deno.readFile(tarballPath);
-    return new Response(bytes, {
-      status: 200,
-      headers: { 'content-type': 'application/gzip' },
-    });
-  };
-}
 
 Deno.test('pull (SHA match): skips download when lockfile sha matches remote', async () => {
   const env = await setupIsolatedEnv();
