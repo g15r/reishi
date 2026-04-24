@@ -1,4 +1,4 @@
-#!/usr/bin/env -S deno run --allow-read --allow-write --allow-env=HOME,EDITOR,REISHI_CONFIG --allow-net=platform.claude.com,code.claude.com,github.com,codeload.github.com --allow-run
+#!/usr/bin/env -S deno run --allow-read --allow-write --allow-env=HOME,EDITOR,REISHI_CONFIG,REISHI_LOCKFILE --allow-net=platform.claude.com,code.claude.com,github.com,codeload.github.com --allow-run
 
 /**
  * reishi - Unified CLI for Claude Agent Skill management
@@ -23,10 +23,14 @@ import { CompletionsCommand } from '@cliffy/command/completions';
 import { dim, green, italic, magenta, red, yellow } from '@std/fmt/colors';
 import {
   getConfigPath,
+  getLockfilePath,
   initConfig,
   loadConfig,
+  loadLockfile,
   saveConfig,
+  saveLockfile,
   type SkillEntry,
+  type SkillLockEntry,
 } from './config.ts';
 import { getDeactivatedDir, getRulesSourceDir, getSourceDir } from './paths.ts';
 import {
@@ -832,20 +836,18 @@ export interface AddSkillOptions {
 }
 
 /**
- * Write or update the `[skills.<name>]` entry for a just-installed skill.
- * Returns the path to the config file that was written.
+ * Write or update the lockfile entry for a just-installed skill. Returns the
+ * path to the lockfile that was written.
  */
 async function trackSkill(
   installedName: string,
-  entry: SkillEntry,
+  entry: SkillLockEntry,
 ): Promise<string> {
-  const config = await loadConfig();
-  const skills = config.skills ?? {};
-  const existing = skills[installedName] ?? {};
-  skills[installedName] = { ...existing, ...entry };
-  config.skills = skills;
-  await saveConfig(config);
-  return getConfigPath();
+  const lockfile = await loadLockfile();
+  const existing = lockfile.skills[installedName];
+  lockfile.skills[installedName] = { ...existing, ...entry };
+  await saveLockfile(lockfile);
+  return getLockfilePath();
 }
 
 async function addSkill(
@@ -964,7 +966,7 @@ async function addSkill(
       entrySubpath: string,
     ): Promise<void> => {
       if (!options.track) return;
-      const entry: SkillEntry = {
+      const entry: SkillLockEntry = {
         source_url: sourceUrl,
         subpath: entrySubpath,
         ref,
@@ -976,7 +978,7 @@ async function addSkill(
         `${green('📌 Tracked')} ${magenta(installedName)} ${dim(italic(`(${sourceUrl})`))}`,
       );
       console.log(`   ${dim(italic('synced_at:'))} ${entry.synced_at}`);
-      console.log(`   ${dim(italic('config:'))} ${magenta(path)}`);
+      console.log(`   ${dim(italic('lockfile:'))} ${magenta(path)}`);
     };
 
     // Only trigger target sync when the install landed in the configured
@@ -1005,8 +1007,8 @@ async function addSkill(
       // Re-track: dir already exists AND skill is already tracked → refresh
       // synced_at and succeed. Full re-sync is Phase 4.
       if (!outcome.ok && outcome.existed && options.track) {
-        const existingConfig = await loadConfig();
-        if (existingConfig.skills?.[installedName]) {
+        const existingLock = await loadLockfile();
+        if (existingLock.skills[installedName]) {
           await maybeTrack(installedName, subpath);
           return true;
         }

@@ -26,7 +26,7 @@ async function runrei(
       'run',
       '--allow-read',
       '--allow-write',
-      '--allow-env=HOME,TMPDIR,EDITOR,REISHI_CONFIG',
+      '--allow-env=HOME,TMPDIR,EDITOR,REISHI_CONFIG,REISHI_LOCKFILE',
       '--allow-net=platform.claude.com,code.claude.com',
       '--allow-run',
       scriptPath,

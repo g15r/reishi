@@ -14,9 +14,12 @@ import {
   defaultConfig,
   expandHome,
   getConfigPath,
+  getLockfilePath,
   initConfig,
   loadConfig,
+  loadLockfile,
   saveConfig,
+  saveLockfile,
 } from './config.ts';
 
 async function withTempConfig(
@@ -116,7 +119,7 @@ Deno.test('saveConfig then loadConfig round-trips fidelity', async () => {
   });
 });
 
-Deno.test('initConfig creates config file and directories', async () => {
+Deno.test('initConfig creates config file, lockfile, and directories', async () => {
   await withTempConfig(async ({ tmp, configPath }) => {
     const result = await initConfig();
     assertEquals(result.alreadyExisted, false);
@@ -128,9 +131,15 @@ Deno.test('initConfig creates config file and directories', async () => {
     assertStringIncludes(contents, '[paths]');
     // Source directories created at HOME-relative paths.
     assert(await exists(join(tmp, '.config/reishi/skills')), 'skills dir should exist');
+    assert(
+      await exists(join(tmp, '.config/reishi/skills/_deactivated')),
+      '_deactivated dir should exist',
+    );
     assert(await exists(join(tmp, '.config/reishi/rules')), 'rules dir should exist');
     assert(await exists(join(tmp, '.config/reishi/docs')), 'docs dir should exist');
-    assertEquals(result.createdDirs.length, 3);
+    // Lockfile lands alongside REISHI_CONFIG (which the test pins to tmp/config.toml).
+    assert(await exists(join(tmp, 'reishi-lock.toml')), 'lockfile should exist');
+    assertEquals(result.createdDirs.length, 4);
   });
 });
 
@@ -143,5 +152,74 @@ Deno.test('initConfig does not overwrite existing config', async () => {
     assertEquals(result.alreadyExisted, true);
     const contents = await Deno.readTextFile(configPath);
     assertEquals(contents, existing);
+  });
+});
+
+Deno.test('loadLockfile returns empty when file missing', async () => {
+  await withTempConfig(async () => {
+    const lock = await loadLockfile();
+    assertEquals(lock, { skills: {} });
+  });
+});
+
+Deno.test('saveLockfile then loadLockfile round-trips fidelity', async () => {
+  await withTempConfig(async () => {
+    await saveLockfile({
+      skills: {
+        alpha: {
+          source_url: 'https://github.com/foo/bar',
+          subpath: 'skills/alpha',
+          ref: 'main',
+          synced_at: '2026-04-24T00:00:00Z',
+          sha: 'abc123',
+          prefix: 'foo',
+        },
+      },
+    });
+    const loaded = await loadLockfile();
+    const entry = loaded.skills.alpha;
+    assertEquals(entry.source_url, 'https://github.com/foo/bar');
+    assertEquals(entry.subpath, 'skills/alpha');
+    assertEquals(entry.ref, 'main');
+    assertEquals(entry.sha, 'abc123');
+    assertEquals(entry.prefix, 'foo');
+  });
+});
+
+Deno.test('getLockfilePath honors REISHI_LOCKFILE override', () => {
+  const prev = Deno.env.get('REISHI_LOCKFILE');
+  Deno.env.set('REISHI_LOCKFILE', '/tmp/custom/lockfile.toml');
+  try {
+    assertEquals(getLockfilePath(), '/tmp/custom/lockfile.toml');
+  } finally {
+    if (prev === undefined) Deno.env.delete('REISHI_LOCKFILE');
+    else Deno.env.set('REISHI_LOCKFILE', prev);
+  }
+});
+
+Deno.test('getLockfilePath defaults alongside config path', () => {
+  const prev = Deno.env.get('REISHI_LOCKFILE');
+  const prevConfig = Deno.env.get('REISHI_CONFIG');
+  Deno.env.delete('REISHI_LOCKFILE');
+  Deno.env.set('REISHI_CONFIG', '/tmp/foo/reishi/config.toml');
+  try {
+    assertEquals(getLockfilePath(), '/tmp/foo/reishi/reishi-lock.toml');
+  } finally {
+    if (prev === undefined) Deno.env.delete('REISHI_LOCKFILE');
+    else Deno.env.set('REISHI_LOCKFILE', prev);
+    if (prevConfig === undefined) Deno.env.delete('REISHI_CONFIG');
+    else Deno.env.set('REISHI_CONFIG', prevConfig);
+  }
+});
+
+Deno.test('initConfig is idempotent: re-running creates nothing new', async () => {
+  await withTempConfig(async () => {
+    const first = await initConfig();
+    assertEquals(first.alreadyExisted, false);
+    assertEquals(first.createdDirs.length, 4);
+
+    const second = await initConfig();
+    assertEquals(second.alreadyExisted, true);
+    assertEquals(second.createdDirs.length, 0);
   });
 });

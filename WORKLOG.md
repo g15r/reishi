@@ -1,5 +1,23 @@
 # Completed Work Log
 
+## Phase 7: Command Restructure, Sync/Pull Split, and Lockfile 🌀
+
+### Lockfile foundation
+
+Extracted tracking state from `config.toml` into `reishi-lock.toml` alongside the config file. Config now holds only user preferences; the lockfile holds machine-managed upstream state.
+
+- [x] Defined `SkillLockEntry` + `LockfileSchema` types in `config.ts` (per-skill: `source_url`, `subpath`, `ref`, `sha`, `synced_at`, `prefix`)
+- [x] Added `loadLockfile()` / `saveLockfile()` alongside existing config functions; default path `~/.config/reishi/reishi-lock.toml`, override via `REISHI_LOCKFILE` mirroring `REISHI_CONFIG` semantics
+- [x] Slimmed `SkillEntry` in `config.ts` down to user overrides only (`sync_method`, `targets`, `updates`); tracking fields (`source_url`, `subpath`, `ref`, `synced_at`, `prefix`, `remote_hash`, `last_check`) dropped
+- [x] Updated every caller (`syncSkill`, `syncStatus`, `fetchUpstream`, `fetchUpstreamForSkill`, `maybeApplyPrefixChange`, `rekeySkillEntry`, `dupeSkillEntry`, `checkForUpdates`) to read/write the lockfile instead of `config.skills[name]`
+- [x] `rei skills add -t` (via `trackSkill`) writes to the lockfile, not the config
+- [x] `initConfig` creates an empty lockfile alongside config and pre-creates `_deactivated/` under `paths.source`. Idempotent: creates only what's missing on re-run.
+- [x] Added `REISHI_LOCKFILE` to every `--allow-env` list (deno.json, reishi.ts shebang, subprocess spawns in integration/cli tests)
+- [x] Tests: lockfile round-trip, `REISHI_LOCKFILE` override honored, `initConfig` idempotency, and every pre-existing test that referenced tracking fields on the config now reads from the lockfile (`test-helpers.ts` exposes `lockfilePath`, each test file got a local `readLockfile`/`writeLockfile` helper where needed)
+- [x] `checkForUpdates` is now a pure read — reports hasUpdate/remoteSha/previousSha from lockfile + remote, no longer writes. `sha` in the lockfile only advances on a real pull.
+
+Note: renaming `SkillEntry` remained in place for the config type rather than introducing `SkillConfigEntry`, to keep the diff narrow. The field semantics changed; the name stayed.
+
 ## Phase 6: Docs Management ✅
 
 ### Project-scoped doc fragments

@@ -56,18 +56,15 @@ export interface DocsConfig {
   projects?: Record<string, DocsProjectEntry>;
 }
 
-// Populated in Phase 2 — interface shape only; no behavior wired yet.
+/**
+ * Per-skill *config* overrides. User-edited, never written by the tool.
+ * Tracking state (source_url, ref, sha, synced_at, prefix, subpath) lives in
+ * the lockfile — see `SkillLockEntry` below.
+ */
 export interface SkillEntry {
-  source_url?: string;
-  subpath?: string;
-  ref?: string;
-  prefix?: string;
-  synced_at?: string;
   sync_method?: SyncMethod;
   targets?: string[];
   updates?: boolean;
-  last_check?: string;
-  remote_hash?: string;
 }
 
 export interface ConfigSchema {
@@ -79,6 +76,23 @@ export interface ConfigSchema {
   rules: RulesConfig;
   docs: DocsConfig;
   skills?: Record<string, SkillEntry>;
+}
+
+/**
+ * Per-skill tracking state. Machine-managed; written by `rei skills add -t`
+ * and `rei skills pull`. Lives in the lockfile alongside the config file.
+ */
+export interface SkillLockEntry {
+  source_url: string;
+  subpath: string;
+  ref: string;
+  sha?: string;
+  synced_at: string;
+  prefix?: string;
+}
+
+export interface LockfileSchema {
+  skills: Record<string, SkillLockEntry>;
 }
 
 export interface InitConfigResult {
@@ -109,6 +123,17 @@ export function getConfigPath(): string {
   const override = Deno.env.get('REISHI_CONFIG');
   if (override) return expandHome(override);
   return join(getHome(), '.config/reishi/config.toml');
+}
+
+/**
+ * Resolves the lockfile path, honoring REISHI_LOCKFILE if set. Defaults to
+ * `reishi-lock.toml` alongside the config file (so the config-dir override
+ * from REISHI_CONFIG takes the lockfile with it).
+ */
+export function getLockfilePath(): string {
+  const override = Deno.env.get('REISHI_LOCKFILE');
+  if (override) return expandHome(override);
+  return join(dirname(getConfigPath()), 'reishi-lock.toml');
 }
 
 // ============================================================================
@@ -209,6 +234,56 @@ export async function saveConfig(config: ConfigSchema): Promise<void> {
 }
 
 // ============================================================================
+// Lockfile
+// ============================================================================
+
+function defaultLockfile(): LockfileSchema {
+  return { skills: {} };
+}
+
+/**
+ * Read and parse the lockfile. Missing file returns an empty lockfile. Invalid
+ * TOML throws a clear error (lockfile is machine-managed; bad content is a bug).
+ */
+export async function loadLockfile(): Promise<LockfileSchema> {
+  const path = getLockfilePath();
+  if (!(await exists(path))) return defaultLockfile();
+
+  let raw: string;
+  try {
+    raw = await Deno.readTextFile(path);
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    throw new Error(`Failed to read lockfile at ${path}: ${message}`);
+  }
+
+  let parsed: unknown;
+  try {
+    parsed = parseTOML(raw);
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    throw new Error(`Invalid TOML in lockfile at ${path}: ${message}`);
+  }
+
+  if (!parsed || typeof parsed !== 'object') return defaultLockfile();
+  const obj = parsed as Record<string, unknown>;
+  const skills = (obj.skills && typeof obj.skills === 'object')
+    ? obj.skills as Record<string, SkillLockEntry>
+    : {};
+  return { skills };
+}
+
+/** Serialize and write the lockfile to disk, creating parent dirs as needed. */
+export async function saveLockfile(lockfile: LockfileSchema): Promise<void> {
+  const path = getLockfilePath();
+  await Deno.mkdir(dirname(path), { recursive: true });
+  const header =
+    `# reishi-lock.toml — managed by rei, do not edit manually.\n# Tracks upstream state for skills installed with \`rei skills add -t\`.\n\n`;
+  const body = stringifyTOML(lockfile as unknown as Record<string, unknown>);
+  await Deno.writeTextFile(path, header + body);
+}
+
+// ============================================================================
 // Init
 // ============================================================================
 
@@ -299,8 +374,9 @@ index_filename = "AGENTS.md"
 
 /**
  * Create the config file at the default path with a commented starter
- * template, and create the source directories for skills/rules/docs.
- * Does NOT overwrite an existing config file.
+ * template, write an empty lockfile alongside it, and create the source
+ * directories for skills/rules/docs (plus `_deactivated/` under the skills
+ * source). Idempotent: existing files and dirs are left as-is.
  */
 export async function initConfig(): Promise<InitConfigResult> {
   const configPath = getConfigPath();
@@ -311,10 +387,17 @@ export async function initConfig(): Promise<InitConfigResult> {
     await Deno.writeTextFile(configPath, STARTER_TEMPLATE);
   }
 
+  const lockfilePath = getLockfilePath();
+  if (!(await exists(lockfilePath))) {
+    await saveLockfile(defaultLockfile());
+  }
+
   // Create the source directories from the (effective) config.
   const config = await loadConfig();
+  const skillsSource = expandHome(config.paths.source);
   const dirs = [
-    expandHome(config.paths.source),
+    skillsSource,
+    join(skillsSource, '_deactivated'),
     expandHome(config.rules.source),
     expandHome(config.docs.source),
   ];

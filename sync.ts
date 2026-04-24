@@ -16,8 +16,10 @@ import { dim, green, italic, magenta, red, yellow } from '@std/fmt/colors';
 import {
   expandHome,
   loadConfig,
+  loadLockfile,
   saveConfig,
-  type SkillEntry,
+  saveLockfile,
+  type SkillLockEntry,
   type SyncMethod,
 } from './config.ts';
 import { getDeactivatedDir, getSourceDir } from './paths.ts';
@@ -121,17 +123,18 @@ export async function syncSkill(
   options: SyncOptions = {},
 ): Promise<SyncResult[]> {
   const config = await loadConfig();
+  const lockfile = await loadLockfile();
   const sourceDir = await getSourceDir();
   let activeSkillName = skillName;
   let skillSource = join(sourceDir, activeSkillName);
 
   // Tracked skills can pull a renamed prefix or new upstream content. Both
   // happen before we touch targets so the redistribution sees the new state.
-  const initialEntry = config.skills?.[activeSkillName];
+  const initialLockEntry = lockfile.skills[activeSkillName];
   const upstreamResults: SyncResult[] = [];
 
-  if (initialEntry) {
-    const renamed = await maybeApplyPrefixChange(activeSkillName, initialEntry, options);
+  if (initialLockEntry) {
+    const renamed = await maybeApplyPrefixChange(activeSkillName, initialLockEntry, options);
     if (renamed.aborted) {
       return [{
         skillName: activeSkillName,
@@ -147,9 +150,9 @@ export async function syncSkill(
     }
 
     const fetchUpstream = options.fetchUpstream ?? true;
-    if (fetchUpstream && initialEntry.source_url) {
-      const fresh = await loadConfig();
-      const entry = fresh.skills?.[activeSkillName];
+    if (fetchUpstream) {
+      const freshLock = await loadLockfile();
+      const entry = freshLock.skills[activeSkillName];
       if (entry?.source_url) {
         const fetched = await fetchUpstreamForSkill(
           activeSkillName,
@@ -179,9 +182,10 @@ export async function syncSkill(
     }];
   }
 
-  // Reload config — fetch/rename may have rewritten it.
+  // Reload config — fetch/rename may have rewritten the lockfile, though not
+  // the config. Re-read anyway so we pick up any outside edits.
   const refreshed = await loadConfig();
-  const entry = refreshed.skills?.[activeSkillName];
+  const configEntry = refreshed.skills?.[activeSkillName];
   if (options.targets) {
     // Validate filter names against config — reject typos early.
     const unknown = options.targets.filter((t) => !(t in refreshed.paths.targets));
@@ -196,10 +200,10 @@ export async function syncSkill(
     }
   }
 
-  const targets = await resolveTargets(entry, options.targets, refreshed.paths.targets);
+  const targets = await resolveTargets(configEntry, options.targets, refreshed.paths.targets);
   if (targets.length === 0) return upstreamResults;
 
-  const method = resolveMethod(refreshed.sync_method, entry?.sync_method, options.method);
+  const method = resolveMethod(refreshed.sync_method, configEntry?.sync_method, options.method);
   const results: SyncResult[] = [...upstreamResults];
 
   for (const target of targets) {
@@ -382,6 +386,7 @@ export interface SkillStatus {
  */
 export async function syncStatus(): Promise<SkillStatus[]> {
   const config = await loadConfig();
+  const lockfile = await loadLockfile();
   const sourceDir = await getSourceDir();
   const results: SkillStatus[] = [];
 
@@ -397,9 +402,10 @@ export async function syncStatus(): Promise<SkillStatus[]> {
 
   for (const name of skillNames) {
     const skillSource = join(sourceDir, name);
-    const entry = config.skills?.[name];
-    const syncedAt = entry?.synced_at ? Date.parse(entry.synced_at) : 0;
-    const targets = await resolveTargets(entry, undefined, config.paths.targets);
+    const configEntry = config.skills?.[name];
+    const lockEntry = lockfile.skills[name];
+    const syncedAt = lockEntry?.synced_at ? Date.parse(lockEntry.synced_at) : 0;
+    const targets = await resolveTargets(configEntry, undefined, config.paths.targets);
 
     for (const target of targets) {
       const targetPath = join(target.path, name);
@@ -577,11 +583,11 @@ async function newestFileMtime(root: string): Promise<number> {
 }
 
 async function downloadAndExtract(
-  entry: SkillEntry,
+  entry: SkillLockEntry,
   fetcher: HttpFetcher,
 ): Promise<{ extractedRoot: string; cleanup: () => Promise<void> }> {
-  const url = entry.source_url!;
-  const ref = entry.ref ?? 'main';
+  const url = entry.source_url;
+  const ref = entry.ref;
   const subpath = entry.subpath ?? '';
   // GitHub URLs look like https://github.com/{user}/{repo}.
   const match = url.match(/^https:\/\/github\.com\/([^/]+)\/([^/]+?)(?:\.git)?$/);
@@ -679,8 +685,8 @@ export function summarizeDiff(diff: FileDiff): string {
 }
 
 interface FetchUpstreamRunOptions extends SyncOptions {
-  /** Pre-fetched dest dir for symmetry with sync. Internal use. */
-  configOverride?: SkillEntry;
+  /** Pre-fetched lock entry for symmetry with sync. Internal use. */
+  lockOverride?: SkillLockEntry;
 }
 
 /**
@@ -692,8 +698,8 @@ export async function fetchUpstream(
   skillName: string,
   options: FetchUpstreamRunOptions = {},
 ): Promise<FetchUpstreamResult> {
-  const config = await loadConfig();
-  const entry = options.configOverride ?? config.skills?.[skillName];
+  const lockfile = await loadLockfile();
+  const entry = options.lockOverride ?? lockfile.skills[skillName];
   if (!entry) {
     return {
       fetched: false,
@@ -708,22 +714,13 @@ export async function fetchUpstream(
 
 /**
  * Internal worker that actually performs the upstream fetch + overwrite. Kept
- * separate so syncSkill can reuse it without re-reading the config.
+ * separate so syncSkill can reuse it without re-reading the lockfile.
  */
 async function fetchUpstreamForSkill(
   skillName: string,
-  entry: SkillEntry,
+  entry: SkillLockEntry,
   options: SyncOptions,
 ): Promise<FetchUpstreamResult> {
-  if (!entry.source_url) {
-    return {
-      fetched: false,
-      changed: false,
-      diff: { added: [], modified: [], removed: [] },
-      aborted: true,
-      reason: 'skill has no source_url',
-    };
-  }
   const fetcher = options.fetcher ?? fetch;
   const sourceDir = await getSourceDir();
   const skillDir = join(sourceDir, skillName);
@@ -795,12 +792,10 @@ async function fetchUpstreamForSkill(
     }
 
     // Always update synced_at so a later mtime check doesn't see "modified".
-    const fresh = await loadConfig();
-    const skills = fresh.skills ?? {};
-    const current = skills[skillName] ?? entry;
-    skills[skillName] = { ...current, synced_at: new Date().toISOString() };
-    fresh.skills = skills;
-    await saveConfig(fresh);
+    const freshLock = await loadLockfile();
+    const current = freshLock.skills[skillName] ?? entry;
+    freshLock.skills[skillName] = { ...current, synced_at: new Date().toISOString() };
+    await saveLockfile(freshLock);
 
     if (changed) {
       console.log(
@@ -829,13 +824,13 @@ interface PrefixChangeResult {
 }
 
 /**
- * Detect when the user edited `prefix` in [skills.<name>] without renaming the
- * dir/key. Three resolution modes: rename (move dir + retarget config),
+ * Detect when the user edited `prefix` in the lockfile without renaming the
+ * dir/key. Three resolution modes: rename (move dir + retarget lock entry),
  * parallel (clone under new name, leave old in place), abort (no-op error).
  */
 async function maybeApplyPrefixChange(
   skillName: string,
-  entry: SkillEntry,
+  entry: SkillLockEntry,
   options: SyncOptions,
 ): Promise<PrefixChangeResult> {
   const config = await loadConfig();
@@ -966,14 +961,12 @@ async function renameSkillEverywhere(
 }
 
 async function rekeySkillEntry(oldName: string, newName: string): Promise<void> {
-  const config = await loadConfig();
-  const skills = config.skills ?? {};
-  const entry = skills[oldName];
+  const lockfile = await loadLockfile();
+  const entry = lockfile.skills[oldName];
   if (!entry) return;
-  delete skills[oldName];
-  skills[newName] = entry;
-  config.skills = skills;
-  await saveConfig(config);
+  delete lockfile.skills[oldName];
+  lockfile.skills[newName] = entry;
+  await saveLockfile(lockfile);
 }
 
 async function dupeSkillEntry(
@@ -982,18 +975,17 @@ async function dupeSkillEntry(
   newPrefix: string,
 ): Promise<void> {
   const config = await loadConfig();
-  const skills = config.skills ?? {};
-  const entry = skills[oldName];
+  const lockfile = await loadLockfile();
+  const entry = lockfile.skills[oldName];
   if (!entry) return;
   // Reset prefix on the original entry to its dir-derived value so the next
   // sync doesn't keep retriggering this flow.
   const separator = config.prefix_separator;
   const sepIdx = oldName.indexOf(separator);
   const oldPrefix = sepIdx >= 0 ? oldName.slice(0, sepIdx) : '';
-  skills[oldName] = { ...entry, prefix: oldPrefix || undefined };
-  skills[newName] = { ...entry, prefix: newPrefix };
-  config.skills = skills;
-  await saveConfig(config);
+  lockfile.skills[oldName] = { ...entry, prefix: oldPrefix || undefined };
+  lockfile.skills[newName] = { ...entry, prefix: newPrefix };
+  await saveLockfile(lockfile);
 }
 
 // ============================================================================
@@ -1022,8 +1014,8 @@ function commitShaUrl(sourceUrl: string, ref: string): string | null {
 
 /**
  * For each tracked skill (or just one), fetch the upstream commit SHA at
- * `ref` and compare against the stored remote_hash. Updates last_check and
- * remote_hash on every successful query.
+ * `ref` and compare against the lockfile's stored `sha`. Pure read — does
+ * not write the lockfile; the SHA only updates when `pull` actually pulls.
  */
 export async function checkForUpdates(
   skillName?: string,
@@ -1031,17 +1023,18 @@ export async function checkForUpdates(
 ): Promise<UpdateCheck[]> {
   const fetcher = options.fetcher ?? fetch;
   const config = await loadConfig();
-  const skills = config.skills ?? {};
-  const names = skillName ? [skillName] : Object.keys(skills);
+  const lockfile = await loadLockfile();
+  const configSkills = config.skills ?? {};
+  const names = skillName ? [skillName] : Object.keys(lockfile.skills);
   const results: UpdateCheck[] = [];
 
   for (const name of names) {
-    const entry = skills[name];
+    const entry = lockfile.skills[name];
     if (!entry) {
       results.push({ skillName: name, hasUpdate: false, skipped: true, reason: 'not tracked' });
       continue;
     }
-    if (entry.updates === false) {
+    if (configSkills[name]?.updates === false) {
       results.push({ skillName: name, hasUpdate: false, skipped: true, reason: 'disabled per-skill' });
       continue;
     }
@@ -1083,19 +1076,11 @@ export async function checkForUpdates(
       results.push({ skillName: name, hasUpdate: false, skipped: true, reason: 'no sha in response' });
       continue;
     }
-    const previousSha = entry.remote_hash;
+    const previousSha = entry.sha;
     const hasUpdate = previousSha !== undefined && previousSha !== sha;
     results.push({ skillName: name, hasUpdate, remoteSha: sha, previousSha });
-
-    skills[name] = {
-      ...entry,
-      remote_hash: sha,
-      last_check: new Date().toISOString(),
-    };
   }
 
-  config.skills = skills;
-  await saveConfig(config);
   return results;
 }
 

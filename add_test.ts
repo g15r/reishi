@@ -12,7 +12,7 @@ import { parse as parseTOML } from '@std/toml';
 import { join } from '@std/path';
 import { exists } from '@std/fs';
 import { addSkill } from './reishi.ts';
-import type { ConfigSchema } from './config.ts';
+import type { ConfigSchema, LockfileSchema } from './config.ts';
 import {
   fakeFetchGithub,
   type IsolatedEnv,
@@ -23,6 +23,13 @@ import {
 async function readConfig(path: string): Promise<ConfigSchema> {
   const text = await Deno.readTextFile(path);
   return parseTOML(text) as unknown as ConfigSchema;
+}
+
+async function readLockfile(path: string): Promise<LockfileSchema> {
+  if (!(await exists(path))) return { skills: {} };
+  const text = await Deno.readTextFile(path);
+  const parsed = parseTOML(text) as unknown as { skills?: LockfileSchema['skills'] };
+  return { skills: parsed.skills ?? {} };
 }
 
 /** Pin env vars for the duration of fn; restore afterwards. */
@@ -102,16 +109,15 @@ Deno.test('add installs all skills from a multi-skill fixture', async () => {
 
 // ---------- Objective 2: --track flag ----------
 
-Deno.test('track: tracked add writes a [skills.<name>] entry', async () => {
+Deno.test('track: tracked add writes a lockfile entry', async () => {
   await withFixture('single-skill-repo', {}, async ({ env, fetcher }) => {
     const url = 'https://github.com/fakeuser/single-skill-repo/tree/main';
     const ok = await addSkill(url, env.sourceDir, { fetcher, track: true });
     assertEquals(ok, true);
 
-    const cfg = await readConfig(env.configPath);
-    assert(cfg.skills, 'skills table missing');
-    const entry = cfg.skills['single-skill-repo'];
-    assert(entry, 'skills.single-skill-repo missing');
+    const lock = await readLockfile(env.lockfilePath);
+    const entry = lock.skills['single-skill-repo'];
+    assert(entry, 'lockfile entry for single-skill-repo missing');
     assertEquals(entry.source_url, 'https://github.com/fakeuser/single-skill-repo');
     assertEquals(entry.ref, 'main');
     assertEquals(entry.subpath, '');
@@ -123,16 +129,15 @@ Deno.test('track: tracked add writes a [skills.<name>] entry', async () => {
   });
 });
 
-Deno.test('track: multi-skill tracked add writes one entry per skill', async () => {
+Deno.test('track: multi-skill tracked add writes one lockfile entry per skill', async () => {
   await withFixture('multi-skill-repo', {}, async ({ env, fetcher }) => {
     const url = 'https://github.com/fakeorg/multi-skill-repo/tree/main/skills';
     const ok = await addSkill(url, env.sourceDir, { fetcher, track: true });
     assertEquals(ok, true);
 
-    const cfg = await readConfig(env.configPath);
-    assert(cfg.skills, 'skills table missing');
-    const br = cfg.skills['book-review'];
-    const rc = cfg.skills['readwise-cli'];
+    const lock = await readLockfile(env.lockfilePath);
+    const br = lock.skills['book-review'];
+    const rc = lock.skills['readwise-cli'];
     assert(br && rc, 'expected both skills tracked');
     assertEquals(br.source_url, 'https://github.com/fakeorg/multi-skill-repo');
     assertEquals(rc.source_url, 'https://github.com/fakeorg/multi-skill-repo');
@@ -141,15 +146,14 @@ Deno.test('track: multi-skill tracked add writes one entry per skill', async () 
   });
 });
 
-Deno.test('track: untracked add writes nothing to [skills]', async () => {
+Deno.test('track: untracked add writes nothing to the lockfile', async () => {
   await withFixture('single-skill-repo', {}, async ({ env, fetcher }) => {
     const url = 'https://github.com/fakeuser/single-skill-repo/tree/main';
     const ok = await addSkill(url, env.sourceDir, { fetcher });
     assertEquals(ok, true);
 
-    const cfg = await readConfig(env.configPath);
-    const skills = cfg.skills ?? {};
-    assertEquals(Object.keys(skills).length, 0);
+    const lock = await readLockfile(env.lockfilePath);
+    assertEquals(Object.keys(lock.skills).length, 0);
   });
 });
 
@@ -158,8 +162,7 @@ Deno.test('track: re-adding a tracked skill updates synced_at', async () => {
     const url = 'https://github.com/fakeuser/single-skill-repo/tree/main';
     const ok1 = await addSkill(url, env.sourceDir, { fetcher, track: true });
     assertEquals(ok1, true);
-    const cfg1 = await readConfig(env.configPath);
-    const first = cfg1.skills!['single-skill-repo'].synced_at!;
+    const first = (await readLockfile(env.lockfilePath)).skills['single-skill-repo'].synced_at!;
 
     // Ensure clock ticks between runs so ISO strings differ.
     await new Promise((resolve) => setTimeout(resolve, 20));
@@ -167,14 +170,14 @@ Deno.test('track: re-adding a tracked skill updates synced_at', async () => {
     // Re-add with --track: dir exists + tracked → re-track path updates timestamp.
     const ok2 = await addSkill(url, env.sourceDir, { fetcher, track: true });
     assertEquals(ok2, true);
-    const cfg2 = await readConfig(env.configPath);
-    const second = cfg2.skills!['single-skill-repo'].synced_at!;
+    const lock2 = await readLockfile(env.lockfilePath);
+    const second = lock2.skills['single-skill-repo'].synced_at!;
     assert(
       second > first,
       `expected synced_at to increase: first=${first} second=${second}`,
     );
     // Still just one entry, not a duplicate.
-    assertEquals(Object.keys(cfg2.skills!).length, 1);
+    assertEquals(Object.keys(lock2.skills).length, 1);
   });
 });
 
@@ -238,7 +241,7 @@ Deno.test('prefix: default_prefix = "none" (default) applies no prefix', async (
   });
 });
 
-Deno.test('prefix + track: prefix recorded in [skills.<name>] entry', async () => {
+Deno.test('prefix + track: prefix recorded in lockfile entry', async () => {
   await withFixture('multi-skill-repo', {}, async ({ env, fetcher }) => {
     const url = 'https://github.com/readwiseio/multi-skill-repo/tree/main/skills';
     const ok = await addSkill(url, env.sourceDir, {
@@ -248,9 +251,9 @@ Deno.test('prefix + track: prefix recorded in [skills.<name>] entry', async () =
     });
     assertEquals(ok, true);
 
-    const cfg = await readConfig(env.configPath);
-    const br = cfg.skills!['readwiseio_book-review'];
-    const rc = cfg.skills!['readwiseio_readwise-cli'];
+    const lock = await readLockfile(env.lockfilePath);
+    const br = lock.skills['readwiseio_book-review'];
+    const rc = lock.skills['readwiseio_readwise-cli'];
     assert(br && rc, 'expected both prefixed skills tracked');
     assertEquals(br.prefix, 'readwiseio');
     assertEquals(rc.prefix, 'readwiseio');
@@ -266,7 +269,7 @@ Deno.test('prefix: prefixed name with underscore separator installs successfully
   });
 });
 
-Deno.test('track: TOML round-trips hyphenated skill names in [skills.<name>]', async () => {
+Deno.test('track: TOML round-trips hyphenated skill names in lockfile entries', async () => {
   await withFixture('multi-skill-repo', {}, async ({ env, fetcher }) => {
     const url = 'https://github.com/readwiseio/multi-skill-repo/tree/main/skills';
     const ok = await addSkill(url, env.sourceDir, {
@@ -276,14 +279,14 @@ Deno.test('track: TOML round-trips hyphenated skill names in [skills.<name>]', a
     });
     assertEquals(ok, true);
 
-    const raw = await Deno.readTextFile(env.configPath);
+    const raw = await Deno.readTextFile(env.lockfilePath);
     // Hyphen + underscore in the key should serialize safely (quoted or dotted).
     assertStringIncludes(raw, 'readwiseio_book-review');
     assertStringIncludes(raw, 'readwiseio_readwise-cli');
 
     // Round-trip still yields valid entries.
-    const cfg = await readConfig(env.configPath);
-    assert(cfg.skills?.['readwiseio_book-review']);
-    assert(cfg.skills?.['readwiseio_readwise-cli']);
+    const lock = await readLockfile(env.lockfilePath);
+    assert(lock.skills['readwiseio_book-review']);
+    assert(lock.skills['readwiseio_readwise-cli']);
   });
 });

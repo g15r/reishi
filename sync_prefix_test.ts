@@ -8,7 +8,7 @@ import { assert, assertEquals } from '@std/assert';
 import { join } from '@std/path';
 import { exists } from '@std/fs';
 import { parse as parseTOML, stringify as stringifyTOML } from '@std/toml';
-import type { ConfigSchema } from './config.ts';
+import type { LockfileSchema, SkillLockEntry } from './config.ts';
 import { resetPathCache } from './paths.ts';
 import { syncSkill } from './sync.ts';
 import {
@@ -38,18 +38,18 @@ async function withEnv(
   }
 }
 
-async function readConfig(path: string): Promise<ConfigSchema> {
+async function readLockfile(path: string): Promise<LockfileSchema> {
+  if (!(await exists(path))) return { skills: {} };
   const text = await Deno.readTextFile(path);
-  return parseTOML(text) as unknown as ConfigSchema;
+  const parsed = parseTOML(text) as unknown as { skills?: LockfileSchema['skills'] };
+  return { skills: parsed.skills ?? {} };
 }
 
-async function writeConfig(
+async function writeLockfile(
   path: string,
-  patch: Record<string, unknown>,
+  patch: { skills: Record<string, SkillLockEntry> },
 ): Promise<void> {
-  const current = parseTOML(await Deno.readTextFile(path)) as Record<string, unknown>;
-  const next = { ...current, ...patch };
-  await Deno.writeTextFile(path, stringifyTOML(next));
+  await Deno.writeTextFile(path, stringifyTOML(patch as unknown as Record<string, unknown>));
 }
 
 async function seedSkill(sourceDir: string, name: string): Promise<string> {
@@ -77,7 +77,7 @@ Deno.test('prefix change (rename): renames source, target, and re-keys config', 
       await seedSkill(claudeTarget, oldName);
 
       // Past synced_at + back-dated mtimes → no local-mod prompt.
-      await writeConfig(env.configPath, {
+      await writeLockfile(env.lockfilePath, {
         skills: {
           [oldName]: {
             source_url: 'https://github.com/readwiseio/multi-skill-repo',
@@ -110,9 +110,9 @@ Deno.test('prefix change (rename): renames source, target, and re-keys config', 
       assert(await exists(join(claudeTarget, newName)));
       assert(!(await exists(join(claudeTarget, oldName))));
       // Config re-keyed.
-      const cfg = await readConfig(env.configPath);
-      assert(cfg.skills?.[newName]);
-      assert(!cfg.skills?.[oldName]);
+      const cfg = await readLockfile(env.lockfilePath);
+      assert(cfg.skills[newName]);
+      assert(!cfg.skills[oldName]);
 
       // Final target-sync result is reported under the new name.
       assert(results.some((r) => r.skillName === newName));
@@ -135,7 +135,7 @@ Deno.test('prefix change (parallel): creates new-named entry alongside old', asy
       const claudeTarget = join(env.home, '.claude', 'skills');
       await Deno.mkdir(claudeTarget, { recursive: true });
 
-      await writeConfig(env.configPath, {
+      await writeLockfile(env.lockfilePath, {
         skills: {
           [oldName]: {
             source_url: 'https://github.com/readwiseio/multi-skill-repo',
@@ -170,10 +170,10 @@ Deno.test('prefix change (parallel): creates new-named entry alongside old', asy
         'new source dir should have been populated by the upstream fetch',
       );
 
-      const cfg = await readConfig(env.configPath);
-      assert(cfg.skills?.[oldName], 'old config entry should be preserved');
-      assert(cfg.skills?.[newName], 'new config entry should exist');
-      assertEquals(cfg.skills?.[newName].prefix, 'readwise');
+      const cfg = await readLockfile(env.lockfilePath);
+      assert(cfg.skills[oldName], 'old config entry should be preserved');
+      assert(cfg.skills[newName], 'new config entry should exist');
+      assertEquals(cfg.skills[newName].prefix, 'readwise');
     });
   } finally {
     try {
@@ -189,7 +189,7 @@ Deno.test('prefix change (abort): exits with informative reason, no writes', asy
     await withEnv(env.env, async () => {
       const oldName = 'readwiseio_book-review';
       await seedSkill(env.sourceDir, oldName);
-      await writeConfig(env.configPath, {
+      await writeLockfile(env.lockfilePath, {
         skills: {
           [oldName]: {
             source_url: 'https://github.com/readwiseio/multi-skill-repo',
@@ -225,7 +225,7 @@ Deno.test('prefix change (dry-run): previews rename without writing', async () =
     await withEnv(env.env, async () => {
       const oldName = 'readwiseio_book-review';
       await seedSkill(env.sourceDir, oldName);
-      await writeConfig(env.configPath, {
+      await writeLockfile(env.lockfilePath, {
         skills: {
           [oldName]: {
             source_url: 'https://github.com/readwiseio/multi-skill-repo',
@@ -247,9 +247,9 @@ Deno.test('prefix change (dry-run): previews rename without writing', async () =
       assert(await exists(join(env.sourceDir, oldName, 'SKILL.md')));
       assert(!(await exists(join(env.sourceDir, 'readwise_book-review'))));
       // Config unchanged.
-      const cfg = await readConfig(env.configPath);
-      assert(cfg.skills?.[oldName]);
-      assert(!cfg.skills?.['readwise_book-review']);
+      const cfg = await readLockfile(env.lockfilePath);
+      assert(cfg.skills[oldName]);
+      assert(!cfg.skills['readwise_book-review']);
     });
   } finally {
     try {
@@ -270,7 +270,7 @@ Deno.test('prefix change (prompt confirms rename): renames via injected prompt',
       await Deno.mkdir(claudeTarget, { recursive: true });
       await seedSkill(claudeTarget, oldName);
 
-      await writeConfig(env.configPath, {
+      await writeLockfile(env.lockfilePath, {
         skills: {
           [oldName]: {
             source_url: 'https://github.com/readwiseio/multi-skill-repo',
@@ -318,7 +318,7 @@ Deno.test('prefix change (prompt confirms parallel): installs alongside via inje
       const claudeTarget = join(env.home, '.claude', 'skills');
       await Deno.mkdir(claudeTarget, { recursive: true });
 
-      await writeConfig(env.configPath, {
+      await writeLockfile(env.lockfilePath, {
         skills: {
           [oldName]: {
             source_url: 'https://github.com/readwiseio/multi-skill-repo',
@@ -347,9 +347,9 @@ Deno.test('prefix change (prompt confirms parallel): installs alongside via inje
       assert(await exists(join(env.sourceDir, oldName, 'SKILL.md')), 'old should be preserved');
       assert(await exists(join(env.sourceDir, newName, 'SKILL.md')), 'new should exist');
 
-      const cfg = await readConfig(env.configPath);
-      assert(cfg.skills?.[oldName], 'old config entry preserved');
-      assert(cfg.skills?.[newName], 'new config entry exists');
+      const cfg = await readLockfile(env.lockfilePath);
+      assert(cfg.skills[oldName], 'old config entry preserved');
+      assert(cfg.skills[newName], 'new config entry exists');
     });
   } finally {
     try {
@@ -365,7 +365,7 @@ Deno.test('prefix change (prompt declines): aborts via injected prompt', async (
     await withEnv(env.env, async () => {
       const oldName = 'readwiseio_book-review';
       await seedSkill(env.sourceDir, oldName);
-      await writeConfig(env.configPath, {
+      await writeLockfile(env.lockfilePath, {
         skills: {
           [oldName]: {
             source_url: 'https://github.com/readwiseio/multi-skill-repo',
@@ -398,7 +398,7 @@ Deno.test('prefix change (no change): no-op when prefix matches dir name', async
       const name = 'readwiseio_book-review';
       await seedSkill(env.sourceDir, name);
       await Deno.mkdir(join(env.home, '.claude', 'skills'), { recursive: true });
-      await writeConfig(env.configPath, {
+      await writeLockfile(env.lockfilePath, {
         skills: {
           [name]: {
             source_url: 'https://github.com/readwiseio/multi-skill-repo',

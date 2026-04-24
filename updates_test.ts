@@ -4,8 +4,9 @@
  */
 
 import { assert, assertEquals } from '@std/assert';
+import { exists } from '@std/fs';
 import { parse as parseTOML, stringify as stringifyTOML } from '@std/toml';
-import type { ConfigSchema } from './config.ts';
+import type { ConfigSchema, LockfileSchema, SkillLockEntry } from './config.ts';
 import { resetPathCache } from './paths.ts';
 import {
   checkForUpdates,
@@ -49,6 +50,25 @@ async function writeConfig(
   await Deno.writeTextFile(path, stringifyTOML(next));
 }
 
+async function writeLockfile(
+  path: string,
+  skills: Record<string, Partial<SkillLockEntry>>,
+): Promise<void> {
+  await Deno.writeTextFile(
+    path,
+    stringifyTOML({ skills } as unknown as Record<string, unknown>),
+  );
+}
+
+// Helper retained for symmetry with other test files, though this file's
+// assertions no longer probe the lockfile directly.
+async function _readLockfile(path: string): Promise<LockfileSchema> {
+  if (!(await exists(path))) return { skills: {} };
+  const text = await Deno.readTextFile(path);
+  const parsed = parseTOML(text) as unknown as { skills?: LockfileSchema['skills'] };
+  return { skills: parsed.skills ?? {} };
+}
+
 /** Build a fetcher that returns `{sha}` JSON for the GitHub commits endpoint. */
 function fakeShaFetcher(sha: string): (url: string) => Promise<Response> {
   return (_url: string) =>
@@ -60,17 +80,17 @@ function fakeShaFetcher(sha: string): (url: string) => Promise<Response> {
     );
 }
 
-Deno.test('checkForUpdates: detects changed SHA against stored remote_hash', async () => {
+Deno.test('checkForUpdates: detects changed SHA against lockfile sha', async () => {
   const env = await setupIsolatedEnv();
   try {
     await withEnv(env.env, async () => {
-      await writeConfig(env.configPath, {
-        skills: {
-          alpha: {
-            source_url: 'https://github.com/foo/bar',
-            ref: 'main',
-            remote_hash: 'aaaaaaa',
-          },
+      await writeLockfile(env.lockfilePath, {
+        alpha: {
+          source_url: 'https://github.com/foo/bar',
+          subpath: '',
+          ref: 'main',
+          synced_at: new Date().toISOString(),
+          sha: 'aaaaaaa',
         },
       });
       const checks = await checkForUpdates(undefined, {
@@ -79,10 +99,7 @@ Deno.test('checkForUpdates: detects changed SHA against stored remote_hash', asy
       assertEquals(checks.length, 1);
       assertEquals(checks[0].hasUpdate, true);
       assertEquals(checks[0].remoteSha, 'bbbbbbb');
-      // Stored remote_hash + last_check were updated.
-      const cfg = await readConfig(env.configPath);
-      assertEquals(cfg.skills?.alpha.remote_hash, 'bbbbbbb');
-      assert(cfg.skills?.alpha.last_check, 'last_check should be recorded');
+      assertEquals(checks[0].previousSha, 'aaaaaaa');
     });
   } finally {
     await env.cleanup();
@@ -93,13 +110,13 @@ Deno.test('checkForUpdates: hasUpdate=false when SHA matches', async () => {
   const env = await setupIsolatedEnv();
   try {
     await withEnv(env.env, async () => {
-      await writeConfig(env.configPath, {
-        skills: {
-          alpha: {
-            source_url: 'https://github.com/foo/bar',
-            ref: 'main',
-            remote_hash: 'cafe',
-          },
+      await writeLockfile(env.lockfilePath, {
+        alpha: {
+          source_url: 'https://github.com/foo/bar',
+          subpath: '',
+          ref: 'main',
+          synced_at: new Date().toISOString(),
+          sha: 'cafe',
         },
       });
       const checks = await checkForUpdates(undefined, {
@@ -113,24 +130,30 @@ Deno.test('checkForUpdates: hasUpdate=false when SHA matches', async () => {
   }
 });
 
-Deno.test('checkForUpdates: skips skills with updates=false', async () => {
+Deno.test('checkForUpdates: skips skills with updates=false in config', async () => {
   const env = await setupIsolatedEnv();
   try {
     await withEnv(env.env, async () => {
-      await writeConfig(env.configPath, {
-        skills: {
-          alpha: {
-            source_url: 'https://github.com/foo/bar',
-            ref: 'main',
-            remote_hash: 'old',
-            updates: false,
-          },
-          beta: {
-            source_url: 'https://github.com/foo/bar',
-            ref: 'main',
-            remote_hash: 'old',
-          },
+      // Tracking state in the lockfile.
+      await writeLockfile(env.lockfilePath, {
+        alpha: {
+          source_url: 'https://github.com/foo/bar',
+          subpath: '',
+          ref: 'main',
+          synced_at: new Date().toISOString(),
+          sha: 'old',
         },
+        beta: {
+          source_url: 'https://github.com/foo/bar',
+          subpath: '',
+          ref: 'main',
+          synced_at: new Date().toISOString(),
+          sha: 'old',
+        },
+      });
+      // Per-skill updates disable lives in config, not lockfile.
+      await writeConfig(env.configPath, {
+        skills: { alpha: { updates: false } },
       });
       const checks = await checkForUpdates(undefined, {
         fetcher: fakeShaFetcher('new'),
@@ -191,16 +214,14 @@ Deno.test('isBackgroundCheckDue: false when [updates].enabled = false', async ()
   }
 });
 
-Deno.test('checkForUpdates: skips untracked or malformed entries with reasons', async () => {
+Deno.test('checkForUpdates: skips untracked or malformed lockfile entries with reasons', async () => {
   const env = await setupIsolatedEnv();
   try {
     await withEnv(env.env, async () => {
-      await writeConfig(env.configPath, {
-        skills: {
-          incomplete: {
-            // No source_url + no ref → skipped.
-            prefix: 'foo',
-          },
+      await writeLockfile(env.lockfilePath, {
+        incomplete: {
+          // No source_url + no ref → skipped.
+          prefix: 'foo',
         },
       });
       const checks = await checkForUpdates(undefined, {

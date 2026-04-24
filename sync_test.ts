@@ -7,7 +7,7 @@ import { assert, assertEquals } from '@std/assert';
 import { join } from '@std/path';
 import { exists } from '@std/fs';
 import { parse as parseTOML, stringify as stringifyTOML } from '@std/toml';
-import type { ConfigSchema } from './config.ts';
+import type { ConfigSchema, SkillLockEntry } from './config.ts';
 import { resetPathCache } from './paths.ts';
 import {
   syncAll,
@@ -56,6 +56,17 @@ async function patchConfig(
   const current = parseTOML(raw) as Record<string, unknown>;
   const next = { ...current, ...patch };
   await Deno.writeTextFile(configPath, stringifyTOML(next));
+}
+
+/** Write the lockfile with the given skill entries. Overwrites, does not merge. */
+async function writeLockfile(
+  lockfilePath: string,
+  skills: Record<string, Partial<SkillLockEntry>>,
+): Promise<void> {
+  await Deno.writeTextFile(
+    lockfilePath,
+    stringifyTOML({ skills } as unknown as Record<string, unknown>),
+  );
 }
 
 Deno.test('syncSkill copy: produces independent files at target', async () => {
@@ -316,10 +327,8 @@ Deno.test('status fresh: synced_at is current, no edits on either side', async (
       await backdateTree(join(env.home, '.claude', 'skills', 'alpha'));
 
       // synced_at is "now" — both sides are older → fresh, not diverged.
-      await patchConfig(env.configPath, {
-        skills: {
-          alpha: { synced_at: new Date().toISOString() },
-        },
+      await writeLockfile(env.lockfilePath, {
+        alpha: { synced_at: new Date().toISOString() },
       });
 
       const statuses = await syncStatus();
@@ -343,10 +352,8 @@ Deno.test('status stale: source updated after synced_at, target untouched', asyn
 
       // Set synced_at to the past.
       const syncedAt = new Date(Date.now() - 60_000);
-      await patchConfig(env.configPath, {
-        skills: {
-          alpha: { synced_at: syncedAt.toISOString() },
-        },
+      await writeLockfile(env.lockfilePath, {
+        alpha: { synced_at: syncedAt.toISOString() },
       });
 
       // Back-date target to before synced_at (no local edits).
@@ -390,10 +397,8 @@ Deno.test('status diverged: target modified after synced_at, source untouched', 
 
       // Set synced_at to the past.
       const syncedAt = new Date(Date.now() - 60_000);
-      await patchConfig(env.configPath, {
-        skills: {
-          alpha: { synced_at: syncedAt.toISOString() },
-        },
+      await writeLockfile(env.lockfilePath, {
+        alpha: { synced_at: syncedAt.toISOString() },
       });
 
       // Back-date source to before synced_at (no upstream changes).
@@ -441,10 +446,8 @@ Deno.test('status stale + diverged: both source and target newer than synced_at'
 
       // synced_at well in the past.
       const syncedAt = new Date(Date.now() - 120_000);
-      await patchConfig(env.configPath, {
-        skills: {
-          alpha: { synced_at: syncedAt.toISOString() },
-        },
+      await writeLockfile(env.lockfilePath, {
+        alpha: { synced_at: syncedAt.toISOString() },
       });
 
       // Both source and target are newer than synced_at.
@@ -505,10 +508,8 @@ Deno.test('status symlink: never stale or diverged', async () => {
       await syncSkill('alpha');
 
       // Even with a stale synced_at, symlinks are always fresh.
-      await patchConfig(env.configPath, {
-        skills: {
-          alpha: { synced_at: new Date(Date.now() - 300_000).toISOString() },
-        },
+      await writeLockfile(env.lockfilePath, {
+        alpha: { synced_at: new Date(Date.now() - 300_000).toISOString() },
       });
 
       const statuses = await syncStatus();

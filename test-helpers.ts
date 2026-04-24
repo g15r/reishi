@@ -20,6 +20,8 @@ export function fixturesPath(...parts: string[]): string {
 export interface IsolatedEnv {
   /** Path to the isolated config.toml. */
   configPath: string;
+  /** Path to the isolated reishi-lock.toml (alongside configPath). */
+  lockfilePath: string;
   /** Root temp dir (parent of everything else). */
   home: string;
   /** Isolated source-of-truth skills dir. */
@@ -49,6 +51,7 @@ export async function setupIsolatedEnv(
   const configDir = join(home, '.config', 'reishi');
   await Deno.mkdir(configDir, { recursive: true });
   const configPath = join(configDir, 'config.toml');
+  const lockfilePath = join(configDir, 'reishi-lock.toml');
   const sourceDir = join(configDir, 'skills');
   await Deno.mkdir(sourceDir, { recursive: true });
 
@@ -81,6 +84,7 @@ export async function setupIsolatedEnv(
 
   return {
     configPath,
+    lockfilePath,
     home,
     sourceDir,
     docsDir,

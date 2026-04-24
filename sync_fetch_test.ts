@@ -8,7 +8,7 @@ import { assert, assertEquals } from '@std/assert';
 import { join } from '@std/path';
 import { exists } from '@std/fs';
 import { parse as parseTOML, stringify as stringifyTOML } from '@std/toml';
-import type { ConfigSchema } from './config.ts';
+import type { LockfileSchema, SkillLockEntry } from './config.ts';
 import { resetPathCache } from './paths.ts';
 import { fetchUpstream, syncSkill } from './sync.ts';
 import {
@@ -38,18 +38,18 @@ async function withEnv(
   }
 }
 
-async function readConfig(path: string): Promise<ConfigSchema> {
+async function readLockfile(path: string): Promise<LockfileSchema> {
+  if (!(await exists(path))) return { skills: {} };
   const text = await Deno.readTextFile(path);
-  return parseTOML(text) as unknown as ConfigSchema;
+  const parsed = parseTOML(text) as unknown as { skills?: LockfileSchema['skills'] };
+  return { skills: parsed.skills ?? {} };
 }
 
-async function writeConfig(
+async function writeLockfile(
   path: string,
-  patch: Record<string, unknown>,
+  patch: { skills: Record<string, SkillLockEntry> },
 ): Promise<void> {
-  const current = parseTOML(await Deno.readTextFile(path)) as Record<string, unknown>;
-  const next = { ...current, ...patch };
-  await Deno.writeTextFile(path, stringifyTOML(next));
+  await Deno.writeTextFile(path, stringifyTOML(patch as unknown as Record<string, unknown>));
 }
 
 async function seedSkill(sourceDir: string, name: string): Promise<string> {
@@ -75,7 +75,7 @@ Deno.test('sync (tracked): pulls upstream, overwrites source, updates synced_at'
       // Use a past synced_at and back-date the seed files so they look in
       // sync (mtime <= synced_at) — the fetch then proceeds without prompting.
       const initialSynced = new Date(Date.now() - 5_000).toISOString();
-      await writeConfig(env.configPath, {
+      await writeLockfile(env.lockfilePath, {
         skills: {
           'single-skill-repo': {
             source_url: 'https://github.com/fakeuser/single-skill-repo',
@@ -97,7 +97,7 @@ Deno.test('sync (tracked): pulls upstream, overwrites source, updates synced_at'
         oldMtime,
       );
 
-      const before = (await readConfig(env.configPath)).skills!['single-skill-repo'].synced_at!;
+      const before = (await readLockfile(env.lockfilePath)).skills['single-skill-repo'].synced_at!;
       await new Promise((r) => setTimeout(r, 20));
 
       const results = await syncSkill('single-skill-repo', {
@@ -111,7 +111,7 @@ Deno.test('sync (tracked): pulls upstream, overwrites source, updates synced_at'
       assert(updated.includes('A test fixture skill'));
 
       // synced_at advanced.
-      const after = (await readConfig(env.configPath)).skills!['single-skill-repo'].synced_at!;
+      const after = (await readLockfile(env.lockfilePath)).skills['single-skill-repo'].synced_at!;
       assert(after > before, `expected synced_at to advance: before=${before} after=${after}`);
 
       // And target sync ran.
@@ -155,7 +155,7 @@ Deno.test('sync (--no-fetch): skips upstream pull even for tracked skills', asyn
     await withEnv(env.env, async () => {
       await seedSkill(env.sourceDir, 'single-skill-repo');
       await Deno.mkdir(join(env.home, '.claude', 'skills'), { recursive: true });
-      await writeConfig(env.configPath, {
+      await writeLockfile(env.lockfilePath, {
         skills: {
           'single-skill-repo': {
             source_url: 'https://github.com/fakeuser/single-skill-repo',
@@ -200,7 +200,7 @@ Deno.test('sync (--dry-run): no source write, no synced_at advance', async () =>
       await seedSkill(env.sourceDir, 'single-skill-repo');
       await Deno.mkdir(join(env.home, '.claude', 'skills'), { recursive: true });
       const initialSynced = new Date(Date.now() + 60_000).toISOString();
-      await writeConfig(env.configPath, {
+      await writeLockfile(env.lockfilePath, {
         skills: {
           'single-skill-repo': {
             source_url: 'https://github.com/fakeuser/single-skill-repo',
@@ -222,7 +222,7 @@ Deno.test('sync (--dry-run): no source write, no synced_at advance', async () =>
       );
       assert(src.includes('description: stale'));
       // synced_at unchanged.
-      const after = (await readConfig(env.configPath)).skills!['single-skill-repo'].synced_at!;
+      const after = (await readLockfile(env.lockfilePath)).skills['single-skill-repo'].synced_at!;
       assertEquals(after, initialSynced);
     });
   } finally {
@@ -240,7 +240,7 @@ Deno.test('sync (local mods, no force): aborts with informative reason', async (
     await withEnv(env.env, async () => {
       await seedSkill(env.sourceDir, 'single-skill-repo');
       // synced_at is OLDER than mtime — the source files look "locally modified".
-      await writeConfig(env.configPath, {
+      await writeLockfile(env.lockfilePath, {
         skills: {
           'single-skill-repo': {
             source_url: 'https://github.com/fakeuser/single-skill-repo',
@@ -279,7 +279,7 @@ Deno.test('sync (local mods, --force): proceeds and overwrites source', async ()
   try {
     await withEnv(env.env, async () => {
       await seedSkill(env.sourceDir, 'single-skill-repo');
-      await writeConfig(env.configPath, {
+      await writeLockfile(env.lockfilePath, {
         skills: {
           'single-skill-repo': {
             source_url: 'https://github.com/fakeuser/single-skill-repo',
@@ -320,7 +320,7 @@ Deno.test('sync (multi-skill repo): only the requested skill is synced from the 
 
       const sharedUrl = 'https://github.com/fakeorg/multi-skill-repo';
       const farFuture = new Date(Date.now() + 60_000).toISOString();
-      await writeConfig(env.configPath, {
+      await writeLockfile(env.lockfilePath, {
         skills: {
           'book-review': {
             source_url: sharedUrl,
@@ -360,7 +360,7 @@ Deno.test('sync (local mods, prompt accepts): proceeds like --force', async () =
   try {
     await withEnv(env.env, async () => {
       await seedSkill(env.sourceDir, 'single-skill-repo');
-      await writeConfig(env.configPath, {
+      await writeLockfile(env.lockfilePath, {
         skills: {
           'single-skill-repo': {
             source_url: 'https://github.com/fakeuser/single-skill-repo',
@@ -397,7 +397,7 @@ Deno.test('sync (local mods, prompt declines): aborts with declined reason', asy
   try {
     await withEnv(env.env, async () => {
       await seedSkill(env.sourceDir, 'single-skill-repo');
-      await writeConfig(env.configPath, {
+      await writeLockfile(env.lockfilePath, {
         skills: {
           'single-skill-repo': {
             source_url: 'https://github.com/fakeuser/single-skill-repo',
@@ -434,7 +434,7 @@ Deno.test('fetchUpstream (direct): exposes structured diff for tracked skill', a
   try {
     await withEnv(env.env, async () => {
       await seedSkill(env.sourceDir, 'single-skill-repo');
-      await writeConfig(env.configPath, {
+      await writeLockfile(env.lockfilePath, {
         skills: {
           'single-skill-repo': {
             source_url: 'https://github.com/fakeuser/single-skill-repo',
