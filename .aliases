@@ -1,2 +1,3 @@
 [aliases]
 ship = "deno task test; and deno task install"
+t = "deno task test"
