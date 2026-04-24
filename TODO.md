@@ -6,25 +6,6 @@ Overhaul of the first-pass v1 work: introduce a lockfile to separate config from
 
 The objectives below are mostly sequential — later work reads state written by earlier work, so treat this as a single-agent pass rather than a parallelizable phase. Conceptual model lives in `AGENTS.md`; implementation needs to catch up to it.
 
-### Command restructure
-
-Move skill commands under `rei skills`, rename the skill scaffold command, simplify rules and docs to match their filesystem-first design, and drop `config edit`. Hard break — no top-level aliases for the moved commands.
-
-- [ ] Create `rei skills` parent with subcommands: `new`, `validate`, `add`, `list`, `activate`, `deactivate`, `pull`, `sync`, `status`, `updates`
-- [ ] Rename the skill scaffold command from `init` to `new` (frees "init" for config-only meaning)
-- [ ] Move existing top-level skill commands (`init`→`new`, `validate`, `add`, `list`, `activate`, `deactivate`) under `rei skills`; remove the old top-level entries entirely
-- [ ] Keep `rei sync` top-level as cross-domain convenience (skills + rules + docs)
-- [ ] `rei skills sync` / `rei rules sync` / `rei docs sync` each sync their own domain only
-- [ ] Remove `--rules-only`, `--skills-only`, `--docs-only` flags from top-level `sync` (replaced by domain-specific commands)
-- [ ] Simplify `rei rules` to `list` and `sync` — remove `add`, `remove`, `validate` subcommands (users manage files directly)
-- [ ] Simplify `rei docs` to `list`, `add` (project-level: creates dir + config entry), `remove` (project-level: two-step confirmation — remove config entry, then optionally delete docs dir), and `sync`; drop fragment-level `add`/`remove` and standalone `compile`
-- [ ] `rei docs sync --stdout` replaces `rei docs compile --stdout` for index preview
-- [ ] Remove `rei config edit` subcommand and its `--allow-run` permissions from `reishi.ts` and `deno.json`
-- [ ] Maintain short aliases where helpful (`rei skills ls`, `rei skills on/off`, etc.)
-- [ ] Update shell completions to reflect the new command tree
-- [ ] Reconcile `AGENTS.md` command listings with actual commands (e.g. `skills new` not `skills init`)
-- [ ] Update all CLI tests (`cli_test.ts` especially) for new command paths
-
 ### Split `sync` and `pull`
 
 `sync` is local-only (source → targets). `pull` is the network operation (GitHub → source), then auto-syncs to targets.

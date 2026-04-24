@@ -2,6 +2,26 @@
 
 ## Phase 7: Command Restructure, Sync/Pull Split, and Lockfile 🌀
 
+### Command restructure
+
+Moved skill commands under `rei skills`, renamed the skill scaffold from `init` to `new`, simplified rules and docs to match the filesystem-first design, and dropped `config edit`. Hard break — no top-level aliases for moved skill commands.
+
+- [x] Created `rei skills` parent with subcommands: `new`, `validate`, `add`, `list`, `activate`, `deactivate`, `sync`, `pull`, `status`, `updates` (pull currently wraps syncSkill with fetch on; split into a dedicated `pullSkill` happens in the next objective)
+- [x] Renamed the skill scaffold command from `init` to `new` (config init stays)
+- [x] Moved existing top-level skill commands under `rei skills`; top-level aliases removed
+- [x] `rei sync` is now strictly top-level cross-domain convenience (skills + rules + docs); no more positional `[skill-name]` arg, no `--*-only` flags, no `--status`
+- [x] `rei skills sync` / `rei rules sync` / `rei docs sync` each sync their own domain only
+- [x] Simplified `rei rules` to `list` and `sync`; retired `add`, `remove`, `validate` subcommands (users manage files directly)
+- [x] Simplified `rei docs` to `list`, `add` (project-level: creates dir + config entry), `remove` (project-level with two-step confirmation — config entry first, then optionally the source dir), and `sync`; dropped fragment-level `add`/`remove` and the standalone `compile` subcommand
+- [x] `rei docs sync [project] --stdout` replaces `rei docs compile --stdout` for index preview; added `stdout` flag to `syncDocs` / `DocsSyncOptions`
+- [x] Added project-level helpers `addDocProject(name, options)` and `removeDocProject(name, options)` in `docs.ts`
+- [x] Removed `rei config edit` subcommand and `configEdit` helper; added a tiny `promptYesNoCli` in `reishi.ts` for the docs-remove two-step confirmation
+- [x] Short aliases preserved where useful (`skills ls`, `skills on`/`off`, `skills a`, `docs ls`/`rm`, `rules ls`)
+- [x] Updated completions (implicit — Cliffy regenerates from the command tree) and verified via `cli_test.ts`
+- [x] Reconciled `AGENTS.md` with actual commands (`skills new`, `skills deactivate` in auto-sync list)
+- [x] Updated CLI tests: `cli_test.ts` now drives `skills new` / `skills validate`, `sync_integration_test.ts` calls `skills sync` / `rules sync`, `compile_test.ts` uses the compiled-binary `skills new` path
+- [x] Factored out a `buildSyncOptions(options)` helper so `skills sync`, `skills pull`, and top-level `sync` share flag parsing for `--targets` / `--method` / `--dry-run` / `--no-fetch` / `--force` / `--prefix-change`
+
 ### Lockfile foundation
 
 Extracted tracking state from `config.toml` into `reishi-lock.toml` alongside the config file. Config now holds only user preferences; the lockfile holds machine-managed upstream state.

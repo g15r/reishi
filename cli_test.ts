@@ -68,7 +68,7 @@ Deno.test('cli: --version exits 0 and prints a version', async () => {
 Deno.test('init: creates skill with all expected files', async () => {
   const tmpDir = await Deno.makeTempDir({ prefix: 'reishi-cli-test-' });
   try {
-    const r = await runrei(['init', 'test-skill', '--path', tmpDir]);
+    const r = await runrei(['skills', 'new', 'test-skill', '--path', tmpDir]);
     assertEquals(r.code, 0, `init failed: ${r.stderr}`);
 
     const skillDir = join(tmpDir, 'test-skill');
@@ -90,7 +90,7 @@ Deno.test('init: rejects invalid skill names', async () => {
   try {
     const invalid = ['Invalid-Name', '-invalid', 'invalid-', 'invalid--name'];
     for (const name of invalid) {
-      const r = await runrei(['init', name, '--path', tmpDir]);
+      const r = await runrei(['skills', 'new', name, '--path', tmpDir]);
       assert(r.code !== 0, `should have rejected: ${name}`);
     }
   } finally {
@@ -101,8 +101,8 @@ Deno.test('init: rejects invalid skill names', async () => {
 Deno.test('init: prevents overwriting existing skill', async () => {
   const tmpDir = await Deno.makeTempDir({ prefix: 'reishi-cli-test-' });
   try {
-    await runrei(['init', 'existing', '--path', tmpDir]);
-    const r = await runrei(['init', 'existing', '--path', tmpDir]);
+    await runrei(['skills', 'new', 'existing', '--path', tmpDir]);
+    const r = await runrei(['skills', 'new', 'existing', '--path', tmpDir]);
     assert(r.code !== 0, 'should fail on overwrite');
     assertStringIncludes(r.stderr, 'already exists');
   } finally {
@@ -113,7 +113,7 @@ Deno.test('init: prevents overwriting existing skill', async () => {
 Deno.test('init: generated SKILL.md has proper frontmatter format', async () => {
   const tmpDir = await Deno.makeTempDir({ prefix: 'reishi-cli-test-' });
   try {
-    await runrei(['init', 'fmt-skill', '--path', tmpDir]);
+    await runrei(['skills', 'new', 'fmt-skill', '--path', tmpDir]);
     const skillMd = await Deno.readTextFile(join(tmpDir, 'fmt-skill', 'SKILL.md'));
 
     assert(skillMd.startsWith('---'), 'should start with frontmatter delimiter');
@@ -128,7 +128,7 @@ Deno.test('init: generated SKILL.md has proper frontmatter format', async () => 
 Deno.test('init: generated script is executable', async () => {
   const tmpDir = await Deno.makeTempDir({ prefix: 'reishi-cli-test-' });
   try {
-    await runrei(['init', 'exec-skill', '--path', tmpDir]);
+    await runrei(['skills', 'new', 'exec-skill', '--path', tmpDir]);
     const stat = await Deno.stat(join(tmpDir, 'exec-skill', 'scripts', 'example.ts'));
     assert((stat.mode! & 0o111) !== 0, 'script should be executable');
   } finally {
@@ -139,7 +139,7 @@ Deno.test('init: generated script is executable', async () => {
 Deno.test('init: template interpolation creates correct names', async () => {
   const tmpDir = await Deno.makeTempDir({ prefix: 'reishi-cli-test-' });
   try {
-    await runrei(['init', 'my-tool', '--path', tmpDir]);
+    await runrei(['skills', 'new', 'my-tool', '--path', tmpDir]);
     const skillMd = await Deno.readTextFile(join(tmpDir, 'my-tool', 'SKILL.md'));
     const scriptTs = await Deno.readTextFile(
       join(tmpDir, 'my-tool', 'scripts', 'example.ts'),
@@ -156,7 +156,7 @@ Deno.test('init: works from an unrelated CWD', async () => {
   const tmpDir = await Deno.makeTempDir({ prefix: 'reishi-cli-test-' });
   const altCwd = await Deno.makeTempDir({ prefix: 'reishi-altcwd-' });
   try {
-    const r = await runrei(['init', 'cwd-skill', '--path', tmpDir], { cwd: altCwd });
+    const r = await runrei(['skills', 'new', 'cwd-skill', '--path', tmpDir], { cwd: altCwd });
     assertEquals(r.code, 0, `init failed: ${r.stderr}`);
     assert(await exists(join(tmpDir, 'cwd-skill', 'SKILL.md')));
   } finally {
@@ -172,8 +172,8 @@ Deno.test('init: works from an unrelated CWD', async () => {
 Deno.test('validate: accepts a valid skill', async () => {
   const tmpDir = await Deno.makeTempDir({ prefix: 'reishi-cli-test-' });
   try {
-    await runrei(['init', 'valid-skill', '--path', tmpDir]);
-    const r = await runrei(['validate', join(tmpDir, 'valid-skill')]);
+    await runrei(['skills', 'new', 'valid-skill', '--path', tmpDir]);
+    const r = await runrei(['skills', 'validate', join(tmpDir, 'valid-skill')]);
     assertEquals(r.code, 0, `validate failed: ${r.stderr}`);
     assertStringIncludes(r.stdout, '✅');
   } finally {
@@ -188,7 +188,7 @@ Deno.test('validate: rejects skill without frontmatter', async () => {
     await Deno.mkdir(dir, { recursive: true });
     await Deno.writeTextFile(join(dir, 'SKILL.md'), 'No frontmatter here!');
 
-    const r = await runrei(['validate', dir]);
+    const r = await runrei(['skills', 'validate', dir]);
     assertEquals(r.code, 1);
     assertStringIncludes(r.stdout, 'frontmatter');
   } finally {
@@ -206,7 +206,7 @@ Deno.test('validate: rejects missing required fields', async () => {
       '---\ndescription: Missing name\n---\n# Skill\n',
     );
 
-    const r = await runrei(['validate', dir]);
+    const r = await runrei(['skills', 'validate', dir]);
     assertEquals(r.code, 1);
     assertStringIncludes(r.stdout, 'name');
   } finally {
@@ -224,7 +224,7 @@ Deno.test('validate: rejects unexpected frontmatter keys', async () => {
       '---\nname: extra-keys\ndescription: Test\nunexpected: value\n---\n# Skill\n',
     );
 
-    const r = await runrei(['validate', dir]);
+    const r = await runrei(['skills', 'validate', dir]);
     assertEquals(r.code, 1);
     assertStringIncludes(r.stdout, 'Unexpected');
   } finally {
@@ -251,8 +251,8 @@ Deno.test('completions: fish outputs valid fish completion script', async () => 
   const r = await runrei(['completions', 'fish']);
   assertEquals(r.code, 0, `stderr=${r.stderr}`);
   assertStringIncludes(r.stdout, 'complete -c rei');
-  // All subcommands present
-  for (const cmd of ['init', 'validate', 'activate', 'deactivate', 'list', 'add', 'refresh-docs']) {
+  // All top-level commands present
+  for (const cmd of ['skills', 'rules', 'docs', 'config', 'sync', 'refresh-docs']) {
     assertStringIncludes(r.stdout, cmd);
   }
 });

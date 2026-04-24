@@ -280,11 +280,11 @@ Deno.test('rei sync (no args): syncs both skills and rules', async () => {
   }
 });
 
-Deno.test('rei sync --skills-only: rules are untouched', async () => {
+Deno.test('rei skills sync: rules are untouched', async () => {
   const env = await setupIsolatedEnv();
   try {
     await seedSkillAndRule(env);
-    const { code, stderr } = await runCli(['sync', '--skills-only', '--no-fetch'], env.env);
+    const { code, stderr } = await runCli(['skills', 'sync', '--no-fetch'], env.env);
     assertEquals(code, 0, `stderr: ${stderr}`);
     assert(await exists(join(env.home, '.claude', 'skills', 'alpha')));
     assert(!(await exists(join(env.home, '.claude', 'rules'))));
@@ -293,11 +293,11 @@ Deno.test('rei sync --skills-only: rules are untouched', async () => {
   }
 });
 
-Deno.test('rei sync --rules-only: skills are untouched', async () => {
+Deno.test('rei rules sync: skills are untouched', async () => {
   const env = await setupIsolatedEnv();
   try {
     await seedSkillAndRule(env);
-    const { code, stderr } = await runCli(['sync', '--rules-only'], env.env);
+    const { code, stderr } = await runCli(['rules', 'sync'], env.env);
     assertEquals(code, 0, `stderr: ${stderr}`);
     assert(!(await exists(join(env.home, '.claude', 'skills', 'alpha'))));
     assert(await exists(join(env.home, '.claude', 'rules', 'no-deletes.md')));

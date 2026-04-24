@@ -26,6 +26,7 @@ import {
   type DocsProjectEntry,
   expandHome,
   loadConfig,
+  saveConfig,
   type SyncMethod,
 } from './config.ts';
 import { getDocsSourceDir } from './paths.ts';
@@ -113,6 +114,90 @@ export async function listFragments(project: string): Promise<FragmentEntry[]> {
   }
   out.sort((a, b) => a.name.localeCompare(b.name));
   return out;
+}
+
+// ============================================================================
+// Project-level add / remove
+// ============================================================================
+
+export interface AddDocProjectOptions {
+  /** Optional project root path stored in `[docs.projects.<name>].target`. */
+  target?: string;
+  /** Allow the source dir to already exist without erroring. */
+  force?: boolean;
+}
+
+export interface AddDocProjectResult {
+  sourceDir: string;
+  /** True when the `[docs.projects.<name>]` entry was newly written. */
+  configWritten: boolean;
+}
+
+/**
+ * Create a doc project: make the `<docs.source>/<project>/` dir and write a
+ * `[docs.projects.<project>]` entry into config.toml. Idempotent enough that
+ * re-running against an existing project is safe with `force: true`.
+ */
+export async function addDocProject(
+  name: string,
+  options: AddDocProjectOptions = {},
+): Promise<AddDocProjectResult> {
+  const dir = join(await getDocsSourceDir(), name);
+  const dirExisted = await exists(dir);
+  if (dirExisted && !options.force) {
+    throw new Error(`docs project already exists: ${name}`);
+  }
+  if (!dirExisted) {
+    await Deno.mkdir(dir, { recursive: true });
+  }
+
+  const config = await loadConfig();
+  const projects = config.docs.projects ?? {};
+  const alreadyInConfig = Boolean(projects[name]);
+  if (!alreadyInConfig) {
+    projects[name] = options.target ? { target: options.target } : { target: '' };
+    config.docs.projects = projects;
+    await saveConfig(config);
+  }
+  return { sourceDir: dir, configWritten: !alreadyInConfig };
+}
+
+export interface RemoveDocProjectOptions {
+  /** Delete the source dir too; when false, only the config entry is removed. */
+  deleteSourceDir?: boolean;
+}
+
+export interface RemoveDocProjectResult {
+  sourceDir: string;
+  removedFromConfig: boolean;
+  sourceDirRemoved: boolean;
+}
+
+/**
+ * Remove a doc project. Always drops the `[docs.projects.<name>]` config
+ * entry. Deletes the `<docs.source>/<name>/` directory only when explicitly
+ * requested — the CLI handles the two-step confirmation prompt.
+ */
+export async function removeDocProject(
+  name: string,
+  options: RemoveDocProjectOptions = {},
+): Promise<RemoveDocProjectResult> {
+  const config = await loadConfig();
+  const projects = config.docs.projects ?? {};
+  const hadEntry = Boolean(projects[name]);
+  if (hadEntry) {
+    delete projects[name];
+    config.docs.projects = projects;
+    await saveConfig(config);
+  }
+
+  const dir = join(await getDocsSourceDir(), name);
+  let sourceDirRemoved = false;
+  if (options.deleteSourceDir && (await exists(dir))) {
+    await Deno.remove(dir, { recursive: true });
+    sourceDirRemoved = true;
+  }
+  return { sourceDir: dir, removedFromConfig: hadEntry, sourceDirRemoved };
 }
 
 /** Return all doc project names — used for tab completion. */
@@ -563,6 +648,8 @@ export interface DocsSyncOptions {
   targetOverride?: string;
   method?: SyncMethod;
   dryRun?: boolean;
+  /** Build the index only; return it in `result.index` without writing. */
+  stdout?: boolean;
 }
 
 export interface DocsSyncRun {
@@ -612,6 +699,7 @@ export async function syncDocs(
     const result = await compileToTarget(project, target, {
       method: options.method,
       dryRun: options.dryRun,
+      stdout: options.stdout,
       fragments: entry.fragments,
     });
     runs.push({ project, target, result });

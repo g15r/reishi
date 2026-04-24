@@ -102,7 +102,7 @@ Deno.test(
       // Run from an unrelated CWD to prove the embedded templates are
       // resolved from the binary, not from wherever the user happens to be.
       const r = await runBin(
-        ['init', 'smoke-skill', '--path', tmpDir],
+        ['skills', 'new', 'smoke-skill', '--path', tmpDir],
         altCwd,
       );
       assertEquals(r.code, 0, `init failed: ${r.stderr}`);
@@ -131,11 +131,11 @@ Deno.test(
 Deno.test('compiled: validate accepts a freshly-initialized skill', async () => {
   const tmpDir = await Deno.makeTempDir({ prefix: 'reishi-compile-validate-' });
   try {
-    const init = await runBin(['init', 'smoke-validate', '--path', tmpDir]);
+    const init = await runBin(['skills', 'new', 'smoke-validate', '--path', tmpDir]);
     assertEquals(init.code, 0, `init failed: ${init.stderr}`);
 
     const skillDir = join(tmpDir, 'smoke-validate');
-    const validate = await runBin(['validate', skillDir]);
+    const validate = await runBin(['skills', 'validate', skillDir]);
     assertEquals(
       validate.code,
       0,

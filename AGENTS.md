@@ -72,7 +72,7 @@ deno task install                 # Install globally as `rei`
 Four top-level domains, each a subcommand group:
 
 ```text
-rei skills  [init|validate|add|list|activate|deactivate|pull|sync|status|updates]
+rei skills  [new|validate|add|list|activate|deactivate|pull|sync|status|updates]
 rei rules   [list|sync]
 rei docs    [list|add|remove|sync]
 rei config  [init|show|path]
@@ -84,7 +84,7 @@ rei sync    ← top-level convenience: sync all three domains at once
 Manage conditionally-activated agent context.
 
 ```bash
-rei skills init <name> [--path dir]       # scaffold from template
+rei skills new <name> [--path dir]        # scaffold from template
 rei skills validate <path>                # check structure + frontmatter
 rei skills add <github-url> [-t] [-p]     # install from GitHub
 rei skills list [-a]                      # list active (or all) skills
@@ -96,7 +96,7 @@ rei skills status                         # per skill x target freshness report
 rei skills updates [name] [--pull]        # check upstream for changes
 ```
 
-#### init
+#### new
 
 Scaffold a new skill:
 
@@ -208,7 +208,7 @@ Individual domain syncs are also available via `rei skills sync`, `rei rules syn
 
 **Sync method resolution** (highest wins): CLI `--method` > per-content-type override > global `sync_method`.
 
-**Auto-sync**: `skills add`, `skills activate`, `skills deactivate`, `skills init`, and `skills pull` trigger sync automatically after completing their work.
+**Auto-sync**: `skills add`, `skills activate`, `skills deactivate`, `skills new`, and `skills pull` trigger sync automatically after completing their work.
 
 ## Config Schema
 
