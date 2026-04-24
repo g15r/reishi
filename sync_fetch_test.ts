@@ -251,11 +251,14 @@ Deno.test('sync (local mods, no force): aborts with informative reason', async (
         },
       });
 
+      // Inject a declining prompt to avoid hanging when stdin is a terminal
+      // (e.g. running `deno task test` from an interactive shell).
       const results = await syncSkill('single-skill-repo', {
         fetcher: fakeFetchGithub(tarball),
+        promptYesNo: async () => false,
       });
-      // Non-interactive => declined => failed result with the local-mod reason.
-      assert(results.some((r) => r.action === 'failed' && (r.reason ?? '').includes('local')));
+      // Declined => failed result with the local-mod reason.
+      assert(results.some((r) => r.action === 'failed' && (r.reason ?? '').includes('declined')));
       // Source untouched — still has the old "stale" description.
       const src = await Deno.readTextFile(
         join(env.sourceDir, 'single-skill-repo', 'SKILL.md'),
@@ -342,6 +345,80 @@ Deno.test('sync (multi-skill repo): only the requested skill is synced from the 
       // readwise-cli was untouched — still says "stale".
       const rc = await Deno.readTextFile(join(env.sourceDir, 'readwise-cli', 'SKILL.md'));
       assert(rc.includes('description: stale'), 'sibling skill should not have been touched');
+    });
+  } finally {
+    try {
+      await Deno.remove(tarball);
+    } catch { /* ignore */ }
+    await env.cleanup();
+  }
+});
+
+Deno.test('sync (local mods, prompt accepts): proceeds like --force', async () => {
+  const env = await setupIsolatedEnv();
+  const tarball = await makeFixtureTarball('single-skill-repo');
+  try {
+    await withEnv(env.env, async () => {
+      await seedSkill(env.sourceDir, 'single-skill-repo');
+      await writeConfig(env.configPath, {
+        skills: {
+          'single-skill-repo': {
+            source_url: 'https://github.com/fakeuser/single-skill-repo',
+            subpath: '',
+            ref: 'main',
+            synced_at: new Date(Date.now() - 300_000).toISOString(),
+          },
+        },
+      });
+      await Deno.mkdir(join(env.home, '.claude', 'skills'), { recursive: true });
+
+      const results = await syncSkill('single-skill-repo', {
+        fetcher: fakeFetchGithub(tarball),
+        promptYesNo: async () => true,
+      });
+      // Prompt accepted → fetch proceeded → source overwritten.
+      const src = await Deno.readTextFile(
+        join(env.sourceDir, 'single-skill-repo', 'SKILL.md'),
+      );
+      assert(src.includes('A test fixture skill'), 'source should contain upstream content');
+      assert(results.some((r) => r.action === 'copied' || r.action === 'symlinked'));
+    });
+  } finally {
+    try {
+      await Deno.remove(tarball);
+    } catch { /* ignore */ }
+    await env.cleanup();
+  }
+});
+
+Deno.test('sync (local mods, prompt declines): aborts with declined reason', async () => {
+  const env = await setupIsolatedEnv();
+  const tarball = await makeFixtureTarball('single-skill-repo');
+  try {
+    await withEnv(env.env, async () => {
+      await seedSkill(env.sourceDir, 'single-skill-repo');
+      await writeConfig(env.configPath, {
+        skills: {
+          'single-skill-repo': {
+            source_url: 'https://github.com/fakeuser/single-skill-repo',
+            subpath: '',
+            ref: 'main',
+            synced_at: new Date(Date.now() - 300_000).toISOString(),
+          },
+        },
+      });
+
+      const results = await syncSkill('single-skill-repo', {
+        fetcher: fakeFetchGithub(tarball),
+        promptYesNo: async () => false,
+      });
+      // Prompt declined → abort with "declined" wording (not the non-interactive hint).
+      assert(results.some((r) => r.action === 'failed' && (r.reason ?? '').includes('declined')));
+      // Source untouched.
+      const src = await Deno.readTextFile(
+        join(env.sourceDir, 'single-skill-repo', 'SKILL.md'),
+      );
+      assert(src.includes('description: stale'));
     });
   } finally {
     try {

@@ -259,6 +259,137 @@ Deno.test('prefix change (dry-run): previews rename without writing', async () =
   }
 });
 
+Deno.test('prefix change (prompt confirms rename): renames via injected prompt', async () => {
+  const env = await setupIsolatedEnv();
+  const tarball = await makeFixtureTarball('multi-skill-repo');
+  try {
+    await withEnv(env.env, async () => {
+      const oldName = 'readwiseio_book-review';
+      await seedSkill(env.sourceDir, oldName);
+      const claudeTarget = join(env.home, '.claude', 'skills');
+      await Deno.mkdir(claudeTarget, { recursive: true });
+      await seedSkill(claudeTarget, oldName);
+
+      await writeConfig(env.configPath, {
+        skills: {
+          [oldName]: {
+            source_url: 'https://github.com/readwiseio/multi-skill-repo',
+            subpath: 'skills/book-review',
+            ref: 'main',
+            prefix: 'readwise',
+            synced_at: new Date(Date.now() - 5_000).toISOString(),
+          },
+        },
+      });
+      const oldMtime = new Date(Date.now() - 60_000);
+      await Deno.utime(join(env.sourceDir, oldName, 'SKILL.md'), oldMtime, oldMtime);
+      await Deno.utime(
+        join(env.sourceDir, oldName, 'scripts', 'run.sh'),
+        oldMtime,
+        oldMtime,
+      );
+
+      const results = await syncSkill(oldName, {
+        fetcher: fakeFetchGithub(tarball),
+        promptYesNo: async () => true,
+        promptChoice: async () => 'r', // rename
+      });
+
+      const newName = 'readwise_book-review';
+      assert(await exists(join(env.sourceDir, newName, 'SKILL.md')));
+      assert(!(await exists(join(env.sourceDir, oldName))));
+      assert(results.some((r) => r.skillName === newName));
+    });
+  } finally {
+    try {
+      await Deno.remove(tarball);
+    } catch { /* ignore */ }
+    await env.cleanup();
+  }
+});
+
+Deno.test('prefix change (prompt confirms parallel): installs alongside via injected prompt', async () => {
+  const env = await setupIsolatedEnv();
+  const tarball = await makeFixtureTarball('multi-skill-repo');
+  try {
+    await withEnv(env.env, async () => {
+      const oldName = 'readwiseio_book-review';
+      await seedSkill(env.sourceDir, oldName);
+      const claudeTarget = join(env.home, '.claude', 'skills');
+      await Deno.mkdir(claudeTarget, { recursive: true });
+
+      await writeConfig(env.configPath, {
+        skills: {
+          [oldName]: {
+            source_url: 'https://github.com/readwiseio/multi-skill-repo',
+            subpath: 'skills/book-review',
+            ref: 'main',
+            prefix: 'readwise',
+            synced_at: new Date(Date.now() - 5_000).toISOString(),
+          },
+        },
+      });
+      const oldMtime = new Date(Date.now() - 60_000);
+      await Deno.utime(join(env.sourceDir, oldName, 'SKILL.md'), oldMtime, oldMtime);
+      await Deno.utime(
+        join(env.sourceDir, oldName, 'scripts', 'run.sh'),
+        oldMtime,
+        oldMtime,
+      );
+
+      await syncSkill(oldName, {
+        fetcher: fakeFetchGithub(tarball),
+        promptYesNo: async () => true,
+        promptChoice: async () => 'p', // parallel
+      });
+
+      const newName = 'readwise_book-review';
+      assert(await exists(join(env.sourceDir, oldName, 'SKILL.md')), 'old should be preserved');
+      assert(await exists(join(env.sourceDir, newName, 'SKILL.md')), 'new should exist');
+
+      const cfg = await readConfig(env.configPath);
+      assert(cfg.skills?.[oldName], 'old config entry preserved');
+      assert(cfg.skills?.[newName], 'new config entry exists');
+    });
+  } finally {
+    try {
+      await Deno.remove(tarball);
+    } catch { /* ignore */ }
+    await env.cleanup();
+  }
+});
+
+Deno.test('prefix change (prompt declines): aborts via injected prompt', async () => {
+  const env = await setupIsolatedEnv();
+  try {
+    await withEnv(env.env, async () => {
+      const oldName = 'readwiseio_book-review';
+      await seedSkill(env.sourceDir, oldName);
+      await writeConfig(env.configPath, {
+        skills: {
+          [oldName]: {
+            source_url: 'https://github.com/readwiseio/multi-skill-repo',
+            subpath: 'skills/book-review',
+            ref: 'main',
+            prefix: 'readwise',
+            synced_at: new Date(Date.now() - 5_000).toISOString(),
+          },
+        },
+      });
+
+      const results = await syncSkill(oldName, {
+        promptYesNo: async () => false,
+      });
+      assert(results.length === 1);
+      assertEquals(results[0].action, 'failed');
+      assert(results[0].reason?.includes('declined'));
+      assert(await exists(join(env.sourceDir, oldName, 'SKILL.md')));
+    });
+  } finally {
+    await env.cleanup();
+  }
+});
+
 Deno.test('prefix change (no change): no-op when prefix matches dir name', async () => {
   const env = await setupIsolatedEnv();
   const tarball = await makeFixtureTarball('multi-skill-repo');

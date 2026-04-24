@@ -25,6 +25,14 @@ import { getDeactivatedDir, getSourceDir } from './paths.ts';
 /** Narrow fetch signature for tarball / JSON endpoints — keeps tests offline. */
 export type HttpFetcher = (url: string) => Promise<Response>;
 
+/** Yes/no prompt callback — returns true for "yes". */
+export type PromptYesNo = (question: string) => Promise<boolean>;
+/** Choice prompt callback — returns the chosen key or null. */
+export type PromptChoice = (
+  question: string,
+  choices: { key: string; label: string }[],
+) => Promise<string | null>;
+
 export interface SyncOptions {
   /** Restrict to this subset of target names (from [paths.targets]). */
   targets?: string[];
@@ -44,6 +52,10 @@ export interface SyncOptions {
   prefixChange?: 'rename' | 'parallel' | 'abort';
   /** Injected fetcher for tests; defaults to global `fetch`. */
   fetcher?: HttpFetcher;
+  /** Injectable yes/no prompt for tests; defaults to terminal stdin. */
+  promptYesNo?: PromptYesNo;
+  /** Injectable choice prompt for tests; defaults to terminal stdin. */
+  promptChoice?: PromptChoice;
 }
 
 export type SyncAction = 'copied' | 'symlinked' | 'skipped' | 'failed';
@@ -350,43 +362,23 @@ export interface SkillStatus {
   target: string;
   targetPath: string;
   present: boolean;
+  /** Source has content newer than the last sync (upstream moved). */
   stale: boolean;
+  /** Target has files modified after the last sync (user made local edits). */
+  diverged: boolean;
   isSymlink: boolean;
 }
 
-async function maxMtime(path: string): Promise<number> {
-  let max = 0;
-  try {
-    const stat = await Deno.stat(path);
-    if (stat.mtime) max = stat.mtime.getTime();
-  } catch {
-    return 0;
-  }
-
-  const walk = async (p: string): Promise<void> => {
-    let info: Deno.FileInfo;
-    try {
-      info = await Deno.stat(p);
-    } catch {
-      return;
-    }
-    if (info.mtime && info.mtime.getTime() > max) max = info.mtime.getTime();
-    if (info.isDirectory) {
-      try {
-        for await (const entry of Deno.readDir(p)) {
-          await walk(join(p, entry.name));
-        }
-      } catch { /* ignore */ }
-    }
-  };
-  await walk(path);
-  return max;
-}
-
 /**
- * For each active skill × configured target, report whether it's present and
- * whether the target copy is stale relative to the source (by max mtime).
- * Symlinks are never stale — they point at the live source.
+ * For each active skill × configured target, report presence, staleness, and
+ * divergence — all anchored on the `synced_at` timestamp in the config.
+ *
+ * - **stale**: the source has files newer than `synced_at` → upstream moved.
+ * - **diverged**: the target has files newer than `synced_at` → user edited.
+ * - Both can be true simultaneously (upstream moved AND user edited).
+ * - Symlinks are never stale or diverged — they always point at the source.
+ * - Untracked skills (no config entry / no `synced_at`) are never stale; they
+ *   can still be diverged if the target has been modified after the source.
  */
 export async function syncStatus(): Promise<SkillStatus[]> {
   const config = await loadConfig();
@@ -405,8 +397,8 @@ export async function syncStatus(): Promise<SkillStatus[]> {
 
   for (const name of skillNames) {
     const skillSource = join(sourceDir, name);
-    const sourceMtime = await maxMtime(skillSource);
     const entry = config.skills?.[name];
+    const syncedAt = entry?.synced_at ? Date.parse(entry.synced_at) : 0;
     const targets = await resolveTargets(entry, undefined, config.paths.targets);
 
     for (const target of targets) {
@@ -422,9 +414,13 @@ export async function syncStatus(): Promise<SkillStatus[]> {
       }
 
       let stale = false;
-      if (present && !isSymlink) {
-        const targetMtime = await maxMtime(targetPath);
-        stale = targetMtime < sourceMtime;
+      let diverged = false;
+
+      if (present && !isSymlink && syncedAt > 0) {
+        const sourceMtime = await newestFileMtime(skillSource);
+        const targetMtime = await newestFileMtime(targetPath);
+        stale = sourceMtime > syncedAt;
+        diverged = targetMtime > syncedAt;
       }
 
       results.push({
@@ -433,6 +429,7 @@ export async function syncStatus(): Promise<SkillStatus[]> {
         targetPath,
         present,
         stale,
+        diverged,
         isSymlink,
       });
     }
@@ -487,7 +484,9 @@ export function printStatus(statuses: SkillStatus[]): void {
     let mark: string;
     if (!s.present) mark = red('missing');
     else if (s.isSymlink) mark = green('symlink');
+    else if (s.stale && s.diverged) mark = yellow('stale + diverged');
     else if (s.stale) mark = yellow('stale');
+    else if (s.diverged) mark = yellow('diverged');
     else mark = green('fresh');
     console.log(`  ${magenta(s.skillName)} → ${s.target} ${dim(italic(`[${mark}]`))}`);
   }
@@ -735,12 +734,13 @@ async function fetchUpstreamForSkill(
     const newest = await newestFileMtime(skillDir);
     const synced = entry.synced_at ? Date.parse(entry.synced_at) : 0;
     if (newest > 0 && synced > 0 && newest > synced) {
+      const askYesNo = options.promptYesNo ?? promptYesNo;
       const acceptable = options.force === true ||
-        await promptYesNo(
+        await askYesNo(
           `Local modifications in ${skillName}. Overwrite? (y/N)`,
         );
       if (!acceptable) {
-        const interactive = Deno.stdin.isTerminal();
+        const interactive = options.promptYesNo !== undefined || Deno.stdin.isTerminal();
         const reason = interactive
           ? 'declined overwrite of local modifications'
           : 'local modifications detected (rerun with --force to override)';
@@ -864,20 +864,22 @@ async function maybeApplyPrefixChange(
       // For dry-run with no explicit decision, treat as rename for preview.
       return { newName };
     }
-    const interactive = Deno.stdin.isTerminal();
+    const interactive = options.promptYesNo !== undefined || Deno.stdin.isTerminal();
     if (!interactive) {
       const reason =
         `prefix changed for ${skillName} ('${currentPrefix}' → '${newPrefix}'); rerun with --prefix-change=rename|parallel|abort`;
       console.error(`${red('❌')} ${reason}`);
       return { aborted: true, reason };
     }
-    const confirmed = await promptYesNo(
+    const askYesNo = options.promptYesNo ?? promptYesNo;
+    const askChoice = options.promptChoice ?? promptChoice;
+    const confirmed = await askYesNo(
       `Prefix for ${skillName} changed from '${currentPrefix}' to '${newPrefix}'. Confirm? (y/N)`,
     );
     if (!confirmed) {
       return { aborted: true, reason: 'prefix change declined' };
     }
-    const choice = await promptChoice(
+    const choice = await askChoice(
       'Rename existing or install in parallel?',
       [
         { key: 'r', label: 'rename' },

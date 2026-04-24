@@ -289,7 +289,12 @@ Deno.test('--targets validates against known names', async () => {
   }
 });
 
-Deno.test('status reports stale when target mtime trails source', async () => {
+// ── Status tests ────────────────────────────────────────────────────────────
+// Status is anchored on synced_at from the config:
+//   stale    = source mtime > synced_at  (upstream moved)
+//   diverged = target mtime > synced_at  (user edited locally)
+
+Deno.test('status fresh: synced_at is current, no edits on either side', async () => {
   const env = await setupIsolatedEnv();
   try {
     await withEnv(env.env, async () => {
@@ -297,31 +302,201 @@ Deno.test('status reports stale when target mtime trails source', async () => {
       await Deno.mkdir(join(env.home, '.claude', 'skills'), { recursive: true });
       await syncSkill('alpha');
 
-      // Artificially mark the target older so source mtime clearly wins.
-      const oldTime = new Date(Date.now() - 60_000);
-      await Deno.utime(join(env.home, '.claude', 'skills', 'alpha', 'SKILL.md'), oldTime, oldTime);
-      await Deno.utime(join(env.home, '.claude', 'skills', 'alpha'), oldTime, oldTime);
+      // Back-date source and target to before synced_at.
+      const past = new Date(Date.now() - 120_000);
+      const backdateTree = async (p: string): Promise<void> => {
+        for await (const entry of Deno.readDir(p)) {
+          const full = join(p, entry.name);
+          if (entry.isDirectory) await backdateTree(full);
+          await Deno.utime(full, past, past);
+        }
+        await Deno.utime(p, past, past);
+      };
+      await backdateTree(join(env.sourceDir, 'alpha'));
+      await backdateTree(join(env.home, '.claude', 'skills', 'alpha'));
 
-      // Bump the source.
-      const now = new Date();
-      await Deno.writeTextFile(
-        join(env.sourceDir, 'alpha', 'SKILL.md'),
-        '---\nname: alpha\ndescription: updated\n---\n',
-      );
-      await Deno.utime(join(env.sourceDir, 'alpha', 'SKILL.md'), now, now);
+      // synced_at is "now" — both sides are older → fresh, not diverged.
+      await patchConfig(env.configPath, {
+        skills: {
+          alpha: { synced_at: new Date().toISOString() },
+        },
+      });
 
       const statuses = await syncStatus();
       const alpha = statuses.find((s) => s.skillName === 'alpha' && s.target === 'claude');
       assert(alpha?.present);
-      assertEquals(alpha?.isSymlink, false);
-      assertEquals(alpha?.stale, true);
+      assertEquals(alpha?.stale, false);
+      assertEquals(alpha?.diverged, false);
     });
   } finally {
     await env.cleanup();
   }
 });
 
-Deno.test('status symlink is always fresh', async () => {
+Deno.test('status stale: source updated after synced_at, target untouched', async () => {
+  const env = await setupIsolatedEnv();
+  try {
+    await withEnv(env.env, async () => {
+      await seedSkill(env.sourceDir, 'alpha');
+      await Deno.mkdir(join(env.home, '.claude', 'skills'), { recursive: true });
+      await syncSkill('alpha');
+
+      // Set synced_at to the past.
+      const syncedAt = new Date(Date.now() - 60_000);
+      await patchConfig(env.configPath, {
+        skills: {
+          alpha: { synced_at: syncedAt.toISOString() },
+        },
+      });
+
+      // Back-date target to before synced_at (no local edits).
+      const oldTarget = new Date(syncedAt.getTime() - 60_000);
+      const backdateTree = async (p: string): Promise<void> => {
+        for await (const entry of Deno.readDir(p)) {
+          const full = join(p, entry.name);
+          if (entry.isDirectory) await backdateTree(full);
+          await Deno.utime(full, oldTarget, oldTarget);
+        }
+        await Deno.utime(p, oldTarget, oldTarget);
+      };
+      await backdateTree(join(env.home, '.claude', 'skills', 'alpha'));
+
+      // Bump source to after synced_at (upstream moved).
+      const future = new Date();
+      await Deno.writeTextFile(
+        join(env.sourceDir, 'alpha', 'SKILL.md'),
+        '---\nname: alpha\ndescription: updated upstream\n---\n',
+      );
+      await Deno.utime(join(env.sourceDir, 'alpha', 'SKILL.md'), future, future);
+
+      const statuses = await syncStatus();
+      const alpha = statuses.find((s) => s.skillName === 'alpha' && s.target === 'claude');
+      assert(alpha?.present);
+      assertEquals(alpha?.stale, true);
+      assertEquals(alpha?.diverged, false);
+    });
+  } finally {
+    await env.cleanup();
+  }
+});
+
+Deno.test('status diverged: target modified after synced_at, source untouched', async () => {
+  const env = await setupIsolatedEnv();
+  try {
+    await withEnv(env.env, async () => {
+      await seedSkill(env.sourceDir, 'alpha');
+      await Deno.mkdir(join(env.home, '.claude', 'skills'), { recursive: true });
+      await syncSkill('alpha');
+
+      // Set synced_at to the past.
+      const syncedAt = new Date(Date.now() - 60_000);
+      await patchConfig(env.configPath, {
+        skills: {
+          alpha: { synced_at: syncedAt.toISOString() },
+        },
+      });
+
+      // Back-date source to before synced_at (no upstream changes).
+      const oldSource = new Date(syncedAt.getTime() - 60_000);
+      const backdateTree = async (p: string): Promise<void> => {
+        for await (const entry of Deno.readDir(p)) {
+          const full = join(p, entry.name);
+          if (entry.isDirectory) await backdateTree(full);
+          await Deno.utime(full, oldSource, oldSource);
+        }
+        await Deno.utime(p, oldSource, oldSource);
+      };
+      await backdateTree(join(env.sourceDir, 'alpha'));
+
+      // Bump target to after synced_at (user edited locally).
+      const future = new Date();
+      await Deno.writeTextFile(
+        join(env.home, '.claude', 'skills', 'alpha', 'SKILL.md'),
+        '---\nname: alpha\ndescription: user tweaked\n---\n',
+      );
+      await Deno.utime(
+        join(env.home, '.claude', 'skills', 'alpha', 'SKILL.md'),
+        future,
+        future,
+      );
+
+      const statuses = await syncStatus();
+      const alpha = statuses.find((s) => s.skillName === 'alpha' && s.target === 'claude');
+      assert(alpha?.present);
+      assertEquals(alpha?.stale, false);
+      assertEquals(alpha?.diverged, true);
+    });
+  } finally {
+    await env.cleanup();
+  }
+});
+
+Deno.test('status stale + diverged: both source and target newer than synced_at', async () => {
+  const env = await setupIsolatedEnv();
+  try {
+    await withEnv(env.env, async () => {
+      await seedSkill(env.sourceDir, 'alpha');
+      await Deno.mkdir(join(env.home, '.claude', 'skills'), { recursive: true });
+      await syncSkill('alpha');
+
+      // synced_at well in the past.
+      const syncedAt = new Date(Date.now() - 120_000);
+      await patchConfig(env.configPath, {
+        skills: {
+          alpha: { synced_at: syncedAt.toISOString() },
+        },
+      });
+
+      // Both source and target are newer than synced_at.
+      const future = new Date();
+      await Deno.writeTextFile(
+        join(env.sourceDir, 'alpha', 'SKILL.md'),
+        '---\nname: alpha\ndescription: upstream update\n---\n',
+      );
+      await Deno.utime(join(env.sourceDir, 'alpha', 'SKILL.md'), future, future);
+
+      await Deno.writeTextFile(
+        join(env.home, '.claude', 'skills', 'alpha', 'SKILL.md'),
+        '---\nname: alpha\ndescription: user edit\n---\n',
+      );
+      await Deno.utime(
+        join(env.home, '.claude', 'skills', 'alpha', 'SKILL.md'),
+        future,
+        future,
+      );
+
+      const statuses = await syncStatus();
+      const alpha = statuses.find((s) => s.skillName === 'alpha' && s.target === 'claude');
+      assert(alpha?.present);
+      assertEquals(alpha?.stale, true);
+      assertEquals(alpha?.diverged, true);
+    });
+  } finally {
+    await env.cleanup();
+  }
+});
+
+Deno.test('status untracked: no synced_at means never stale or diverged', async () => {
+  const env = await setupIsolatedEnv();
+  try {
+    await withEnv(env.env, async () => {
+      await seedSkill(env.sourceDir, 'alpha');
+      await Deno.mkdir(join(env.home, '.claude', 'skills'), { recursive: true });
+      await syncSkill('alpha');
+
+      // No skills entry in config → untracked.
+      const statuses = await syncStatus();
+      const alpha = statuses.find((s) => s.skillName === 'alpha' && s.target === 'claude');
+      assert(alpha?.present);
+      assertEquals(alpha?.stale, false);
+      assertEquals(alpha?.diverged, false);
+    });
+  } finally {
+    await env.cleanup();
+  }
+});
+
+Deno.test('status symlink: never stale or diverged', async () => {
   const env = await setupIsolatedEnv({ sync_method: 'symlink' });
   try {
     await withEnv(env.env, async () => {
@@ -329,11 +504,19 @@ Deno.test('status symlink is always fresh', async () => {
       await Deno.mkdir(join(env.home, '.claude', 'skills'), { recursive: true });
       await syncSkill('alpha');
 
+      // Even with a stale synced_at, symlinks are always fresh.
+      await patchConfig(env.configPath, {
+        skills: {
+          alpha: { synced_at: new Date(Date.now() - 300_000).toISOString() },
+        },
+      });
+
       const statuses = await syncStatus();
       const alpha = statuses.find((s) => s.skillName === 'alpha' && s.target === 'claude');
       assert(alpha?.present);
       assertEquals(alpha?.isSymlink, true);
       assertEquals(alpha?.stale, false);
+      assertEquals(alpha?.diverged, false);
     });
   } finally {
     await env.cleanup();

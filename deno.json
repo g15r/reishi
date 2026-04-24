@@ -31,7 +31,7 @@
   },
   "tasks": {
     "cli": "deno run --allow-read --allow-write --allow-env=HOME,EDITOR,REISHI_CONFIG --allow-net=platform.claude.com,code.claude.com,github.com,codeload.github.com --allow-run reishi.ts",
-    "check": "deno check reishi.ts config.ts paths.ts sync.ts rules.ts docs.ts test-helpers.ts add_test.ts sync_test.ts sync_integration_test.ts sync_fetch_test.ts sync_prefix_test.ts updates_test.ts rules_test.ts docs_test.ts",
+    "check": "deno check reishi.ts config.ts paths.ts sync.ts rules.ts docs.ts test-helpers.ts add_test.ts sync_test.ts sync_integration_test.ts sync_fetch_test.ts sync_prefix_test.ts updates_test.ts rules_test.ts docs_test.ts cli_test.ts",
     "test:unit": "deno test --allow-read --allow-write --allow-env config_test.ts paths_test.ts",
     "test:add": "deno test --allow-read --allow-write --allow-run=cp,tar --allow-env=HOME,TMPDIR,EDITOR,REISHI_CONFIG add_test.ts",
     "test:sync": "deno test --allow-read --allow-write --allow-env=HOME,TMPDIR,EDITOR,REISHI_CONFIG sync_test.ts",
@@ -41,8 +41,9 @@
     "test:updates": "deno test --allow-read --allow-write --allow-env=HOME,TMPDIR,EDITOR,REISHI_CONFIG updates_test.ts",
     "test:rules": "deno test --allow-read --allow-write --allow-run=cp,tar --allow-env=HOME,TMPDIR,EDITOR,REISHI_CONFIG rules_test.ts",
     "test:docs": "deno test --allow-read --allow-write --allow-run=cp,tar --allow-env=HOME,TMPDIR,EDITOR,REISHI_CONFIG docs_test.ts",
+    "test:cli": "deno test --allow-read --allow-write --allow-run=deno --allow-env=HOME,TMPDIR,EDITOR,REISHI_CONFIG cli_test.ts",
     "test:compile": "deno test --allow-read --allow-write --allow-run --allow-env=HOME,TMPDIR,EDITOR,REISHI_CONFIG compile_test.ts",
-    "test": "deno task test:unit && deno task test:add && deno task test:sync && deno task test:sync-integration && deno task test:sync-fetch && deno task test:sync-prefix && deno task test:updates && deno task test:rules && deno task test:docs && deno run --allow-read --allow-write --allow-run=deno,tar --allow-env=HOME,TMPDIR,EDITOR,REISHI_CONFIG --allow-net=platform.claude.com,code.claude.com,github.com,codeload.github.com test-reishi.ts && deno task test:compile",
+    "test": "deno task test:unit && deno task test:add && deno task test:sync && deno task test:sync-integration && deno task test:sync-fetch && deno task test:sync-prefix && deno task test:updates && deno task test:rules && deno task test:docs && deno task test:cli && deno task test:compile",
     "compile": "deno compile --allow-read --allow-write --allow-env=HOME,EDITOR,REISHI_CONFIG --allow-net=platform.claude.com,code.claude.com,github.com,codeload.github.com --allow-run --include assets/ --output bin/rei reishi.ts",
     "compile:all": "scripts/compile-all.sh",
     "install": "deno install --global --config=./deno.json --allow-read --allow-write --allow-env=HOME,EDITOR,REISHI_CONFIG --allow-net=platform.claude.com,code.claude.com,github.com,codeload.github.com --allow-run --name rei --force reishi.ts"
