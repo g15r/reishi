@@ -1052,9 +1052,7 @@ async function configInit(): Promise<boolean> {
         `${yellow('🚧 Config already exists at')} ${magenta(result.configPath)}`,
       );
       console.log(
-        `   ${dim(italic('View it with'))} rei config show ${
-          dim(italic('or edit with'))
-        } rei config edit`,
+        `   ${dim(italic('View it with'))} rei config show`,
       );
       return true;
     }

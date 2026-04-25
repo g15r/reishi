@@ -367,7 +367,7 @@ export interface SkillStatus {
 /**
  * For each active skill × configured target, report presence and freshness —
  * purely local, no network. Upstream-comparison (is there a new commit?) lives
- * in `rei skills pull --dry-run` and `rei skills updates`, not here.
+ * in `rei skills pull --check`, not here.
  *
  * - **stale**: `sourceMtime > targetMtime` → target needs a sync.
  * - **diverged**: `sourceMtime > synced_at` (lockfile) → user has edited the
@@ -1371,7 +1371,7 @@ export async function maybeNotifyOfUpdates(
     const noun = updated.length === 1 ? 'skill has' : 'skills have';
     console.log(
       `${green('✨')} ${updated.length} ${noun} upstream updates — run ${
-        magenta('rei updates')
+        magenta('rei skills pull --check')
       } for details`,
     );
   } catch {

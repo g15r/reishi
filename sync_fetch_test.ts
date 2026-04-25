@@ -1,6 +1,6 @@
 /**
  * Tests for the upstream-fetch arm of `rei sync`. Covers tracked-skill fetch,
- * untracked-skill fallback to target sync, --no-fetch bypass, --force / local
+ * untracked-skill fallback to target sync, SHA-based freshness checks, local
  * modification handling, dry-run preview, and multi-skill repo isolation.
  */
 
