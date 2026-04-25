@@ -137,9 +137,11 @@ Deno.test('initConfig creates config file, lockfile, and directories', async () 
     );
     assert(await exists(join(tmp, '.config/reishi/rules')), 'rules dir should exist');
     assert(await exists(join(tmp, '.config/reishi/docs')), 'docs dir should exist');
+    // Starter template opts in to the shared agent — ~/.agents/ is materialized.
+    assert(await exists(join(tmp, '.agents')), '~/.agents dir should exist');
     // Lockfile lands alongside REISHI_CONFIG (which the test pins to tmp/config.toml).
     assert(await exists(join(tmp, 'reishi-lock.toml')), 'lockfile should exist');
-    assertEquals(result.createdDirs.length, 4);
+    assertEquals(result.createdDirs.length, 5);
   });
 });
 
@@ -216,7 +218,7 @@ Deno.test('initConfig is idempotent: re-running creates nothing new', async () =
   await withTempConfig(async () => {
     const first = await initConfig();
     assertEquals(first.alreadyExisted, false);
-    assertEquals(first.createdDirs.length, 4);
+    assertEquals(first.createdDirs.length, 5);
 
     const second = await initConfig();
     assertEquals(second.alreadyExisted, true);

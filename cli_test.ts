@@ -357,3 +357,92 @@ Deno.test('config: init is idempotent with friendly message', async () => {
     await Deno.remove(configHome, { recursive: true });
   }
 });
+
+// ============================================================================
+// config init --no-comment
+// ============================================================================
+
+Deno.test('config: init -c writes a comment-free config', async () => {
+  const configHome = await Deno.makeTempDir({ prefix: 'reishi-config-' });
+  try {
+    const configPath = join(configHome, 'config.toml');
+    const r = await runrei(['config', 'init', '-c'], {
+      env: { HOME: configHome, REISHI_CONFIG: configPath },
+    });
+    assertEquals(r.code, 0, `stderr=${r.stderr}`);
+    const contents = await Deno.readTextFile(configPath);
+    // No comment lines (other than blank lines) in the output.
+    const commentLines = contents
+      .split('\n')
+      .filter((l) => l.trim().startsWith('#'));
+    assertEquals(
+      commentLines.length,
+      0,
+      `expected no comment lines; got:\n${commentLines.join('\n')}`,
+    );
+  } finally {
+    await Deno.remove(configHome, { recursive: true });
+  }
+});
+
+Deno.test('config: init --no-comment is identical to -c', async () => {
+  const homeShort = await Deno.makeTempDir({ prefix: 'reishi-config-' });
+  const homeLong = await Deno.makeTempDir({ prefix: 'reishi-config-' });
+  try {
+    const shortPath = join(homeShort, 'config.toml');
+    const longPath = join(homeLong, 'config.toml');
+    const rShort = await runrei(['config', 'init', '-c'], {
+      env: { HOME: homeShort, REISHI_CONFIG: shortPath },
+    });
+    const rLong = await runrei(['config', 'init', '--no-comment'], {
+      env: { HOME: homeLong, REISHI_CONFIG: longPath },
+    });
+    assertEquals(rShort.code, 0, `short: ${rShort.stderr}`);
+    assertEquals(rLong.code, 0, `long: ${rLong.stderr}`);
+    const shortContents = await Deno.readTextFile(shortPath);
+    const longContents = await Deno.readTextFile(longPath);
+    assertEquals(shortContents, longContents);
+  } finally {
+    await Deno.remove(homeShort, { recursive: true });
+    await Deno.remove(homeLong, { recursive: true });
+  }
+});
+
+Deno.test('config: init -c still includes include_shared_agent = true', async () => {
+  const configHome = await Deno.makeTempDir({ prefix: 'reishi-config-' });
+  try {
+    const configPath = join(configHome, 'config.toml');
+    const r = await runrei(['config', 'init', '-c'], {
+      env: { HOME: configHome, REISHI_CONFIG: configPath },
+    });
+    assertEquals(r.code, 0, `stderr=${r.stderr}`);
+    const contents = await Deno.readTextFile(configPath);
+    assert(
+      /include_shared_agent\s*=\s*true/.test(contents),
+      `expected 'include_shared_agent = true'; got:\n${contents}`,
+    );
+  } finally {
+    await Deno.remove(configHome, { recursive: true });
+  }
+});
+
+Deno.test('config: init (default) still has comments', async () => {
+  const configHome = await Deno.makeTempDir({ prefix: 'reishi-config-' });
+  try {
+    const configPath = join(configHome, 'config.toml');
+    const r = await runrei(['config', 'init'], {
+      env: { HOME: configHome, REISHI_CONFIG: configPath },
+    });
+    assertEquals(r.code, 0, `stderr=${r.stderr}`);
+    const contents = await Deno.readTextFile(configPath);
+    const commentLines = contents
+      .split('\n')
+      .filter((l) => l.trim().startsWith('#'));
+    assert(
+      commentLines.length > 5,
+      `default init should keep its comments; got ${commentLines.length}`,
+    );
+  } finally {
+    await Deno.remove(configHome, { recursive: true });
+  }
+});

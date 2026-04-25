@@ -1044,9 +1044,9 @@ export { addSkill };
 // Command: config
 // ============================================================================
 
-async function configInit(): Promise<boolean> {
+async function configInit(noComment = false): Promise<boolean> {
   try {
-    const result = await initConfig();
+    const result = await initConfig({ noComment });
     if (result.alreadyExisted) {
       console.log(
         `${yellow('🚧 Config already exists at')} ${magenta(result.configPath)}`,
@@ -1386,9 +1386,18 @@ const configCommand = new Command()
   })
   .command('init')
   .description('Create the reishi config file and source directories')
+  .option(
+    '-c, --no-comment',
+    'Write a clean comment-free config (skip the documented starter template)',
+  )
   .example('Initialize config', 'rei config init')
-  .action(async () => {
-    const success = await configInit();
+  .example('Initialize without comments', 'rei config init -c')
+  .action(async (options) => {
+    // Cliffy quirk: `-c` exposes `noComment: true`; the long form `--no-comment`
+    // exposes `comment: false`. Either signals "skip the commented template".
+    const opts = options as { noComment?: boolean; comment?: boolean };
+    const noComment = opts.noComment === true || opts.comment === false;
+    const success = await configInit(noComment);
     Deno.exit(success ? 0 : 1);
   })
   .command('show')
@@ -1409,7 +1418,8 @@ const configCommand = new Command()
 cli.command('config', configCommand);
 
 // Top-level sync — cross-domain convenience (skills + rules + docs).
-// Local-only: no network, no upstream fetch. Use `rei skills pull` to fetch.
+// Local-only: no network, no remote pulls. Use `rei skills pull` to refresh
+// tracked skills from their remotes.
 cli
   .command('sync')
   .description('Sync skills, rules, and docs from source to targets (local only)')

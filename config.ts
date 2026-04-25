@@ -110,7 +110,23 @@ export interface ConfigSchema {
   projects: Record<string, DocsProjectEntry>;
   /** Per-skill config overrides (optional). */
   skill_overrides?: Record<string, SkillEntry>;
+  /**
+   * Opt in to the built-in `shared` agent target at `~/.agents/`. Synthesized
+   * by `loadConfig` — `agents.shared` is reserved and any user-defined entry
+   * with that name is ignored. Defaults to false; the starter template sets
+   * it to true so new users get cross-agent context out of the box.
+   */
+  include_shared_agent?: boolean;
 }
+
+/** Reserved name for the built-in shared-agent target. */
+export const SHARED_AGENT_NAME = 'shared';
+
+/** Built-in path for the shared-agent target. Not user-configurable. */
+export const SHARED_AGENT_PATHS: AgentConfig = {
+  skills: '~/.agents/skills',
+  rules: '~/.agents/rules',
+};
 
 /**
  * Per-skill tracking state. Machine-managed; written by `rei skills add -t`
@@ -239,7 +255,7 @@ function deepMerge<T>(base: T, overrides: unknown): T {
 export async function loadConfig(): Promise<ConfigSchema> {
   const path = getConfigPath();
   const defaults = defaultConfig();
-  if (!(await exists(path))) return defaults;
+  if (!(await exists(path))) return applySharedAgent(defaults);
 
   let raw: string;
   try {
@@ -257,7 +273,23 @@ export async function loadConfig(): Promise<ConfigSchema> {
     throw new Error(`Invalid TOML in config at ${path}: ${message}`);
   }
 
-  return deepMerge(defaults, parsed);
+  const merged = deepMerge(defaults, parsed);
+  return applySharedAgent(merged);
+}
+
+/**
+ * Synthesize the built-in `shared` agent entry when opted in, and strip any
+ * user-defined `agents.shared` otherwise. The reserved name always maps to
+ * `~/.agents/` — users cannot redirect it.
+ */
+function applySharedAgent(config: ConfigSchema): ConfigSchema {
+  const agents = { ...config.agents };
+  if (config.include_shared_agent === true) {
+    agents[SHARED_AGENT_NAME] = { ...SHARED_AGENT_PATHS };
+  } else if (SHARED_AGENT_NAME in agents) {
+    delete agents[SHARED_AGENT_NAME];
+  }
+  return { ...config, agents };
 }
 
 /** Serialize and write the config to disk, creating parent dirs as needed. */
@@ -322,58 +354,82 @@ export async function saveLockfile(lockfile: LockfileSchema): Promise<void> {
 // Init
 // ============================================================================
 
-const STARTER_TEMPLATE = `# ~/.config/reishi/config.toml
+const STARTER_TEMPLATE_COMMENTED = `# ~/.config/reishi/config.toml
+#
+# Welcome to reishi. This config maps your authoring source (where you edit
+# rules, skills, and docs) to the targets reishi syncs to (your agents and
+# projects). Edit values inline; comments are for orientation, not parsing.
+#
+# Vocabulary cheat sheet:
+#   fragment  — any single markdown file reishi manages
+#   source    — where you author content (this directory's siblings)
+#   target    — where reishi syncs fragments (agents and projects)
+#   sync      — local-only write from source to targets
+#   pull      — fetch fresh content from a remote (only for tracked skills)
+#   remote    — the upstream location of a tracked skill (a GitHub repo)
 
 # ----------------------------------------------------------
 # Global defaults
 # ----------------------------------------------------------
 
-# How reishi distributes content to targets: "copy" or "symlink"
+# How reishi syncs to targets: "copy" (default, simple, robust) or "symlink"
+# (edits propagate instantly; better for active authoring).
 sync_method = "copy"
 
-# Default prefix behavior when --prefix is used without a value
-# "infer" = derive from GitHub org/user, "none" = no prefix
+# Prefix behavior for \`rei skills add -p\` without an explicit value.
+# "infer" derives the prefix from the GitHub org/user (recommended).
+# "none" disables auto-prefixing — you can still set one explicitly per add.
 default_prefix = "infer"
 
-# Separator between prefix and skill name
+# Separator placed between prefix and skill name (e.g. "readwiseio_book-review").
 prefix_separator = "_"
 
+# Opt in to the built-in 'shared' agent target at ~/.agents/. The shared
+# target is reishi's cross-agent convention — tools that read AGENTS.md
+# (Claude Code, Cursor, OpenCode, etc.) all find the same content here.
+# Set to false to disable; the built-in path is fixed and not configurable.
+include_shared_agent = true
+
 # ----------------------------------------------------------
-# Skills
+# Skills — conditionally activated agent context
 # ----------------------------------------------------------
 
 [skills]
-# Source of truth for skills — all managed skills live here.
+# Where you author skills. Each subdirectory is one skill (must contain
+# SKILL.md with name + description frontmatter). Reishi never writes here
+# without your explicit action.
 source = "~/.config/reishi/skills"
 
 # ----------------------------------------------------------
-# Update polling
+# Update polling — background check for new remote SHAs on tracked skills
 # ----------------------------------------------------------
 
 [updates]
-# Check tracked skills for upstream changes: true / false
+# Background-check tracked skills for new remote SHAs and notify in the
+# next CLI invocation. Pure read — no downloads, no writes, no surprises.
 enabled = true
 
-# How often to check, in hours
+# How long to wait between background checks, in hours.
 interval_hours = 24
 
 # ----------------------------------------------------------
-# Rules
+# Rules — always-on agent context, loaded every session
 # ----------------------------------------------------------
 
 [rules]
-# Where reishi-managed rules live
+# Where you author rules. Each markdown file or directory in here is a rule
+# that gets synced to every agent target.
 source = "~/.config/reishi/rules"
 
-# Sync method override for rules (inherits global sync_method if unset)
+# Sync method override for rules. Inherits global \`sync_method\` if unset.
 # sync_method = "symlink"
 
 # ----------------------------------------------------------
-# Agents — named destinations for skills + rules
+# Agents — named targets for skills + rules
 # ----------------------------------------------------------
 
-# Each agent groups a skills path and a rules path under one name.
-# Use --agents=<name> on sync/pull to filter.
+# Each agent groups a skills path and a rules path under one name. Use
+# --agents=<name> on \`rei sync\` and \`rei skills pull\` to filter.
 [agents.claude]
 skills = "~/.claude/skills"
 rules = "~/.claude/rules"
@@ -383,35 +439,66 @@ rules = "~/.claude/rules"
 # rules = "~/.opencode/rules"
 
 # ----------------------------------------------------------
-# Docs
+# Docs — project-scoped agent context, compiled into an index
 # ----------------------------------------------------------
 
 [docs]
-# Where reishi-managed doc fragments live, organized by project subdirs
+# Where you author doc fragments, organized by project subdirectory.
 source = "~/.config/reishi/docs"
 
-# Default target path relative to project root
+# Where fragments land inside a project, relative to the project root.
 default_target = ".agents/docs"
 
-# Name of the compiled index file placed in the project root
+# Filename of the compiled index that lands in the project root.
 index_filename = "AGENTS.md"
 
 # Soft cap on the compiled index size, in approximate tokens (chars/4).
 # token_budget = 4000
 
-# Sync method override for docs
+# Sync method override for docs. Inherits global \`sync_method\` if unset.
 # sync_method = "symlink"
 
 # ----------------------------------------------------------
-# Projects — named destinations for docs
+# Projects — named targets for docs
 # ----------------------------------------------------------
 
-# Each project maps a name to a project root on disk. Fragments are optional;
-# omit to include every fragment in <docs.source>/<name>/.
+# Each project maps a name to a project root on disk. \`fragments\` is
+# optional; when omitted, every fragment under <docs.source>/<name>/ is
+# included. Use \`rei docs add <name> --target <path>\` to create one.
 # [projects.myproject]
 # path = "~/code/myproject"
 # fragments = ["api-conventions.md", "testing.md"]
 `;
+
+/**
+ * Build the comment-free starter template by serializing the canonical
+ * defaults plus the opt-ins the commented template ships with. Keeps the
+ * two outputs in lockstep so toggling `--no-comment` only strips comments.
+ */
+function starterTemplateNoComment(): string {
+  const cfg = defaultConfig();
+  const obj: Record<string, unknown> = {
+    sync_method: cfg.sync_method,
+    default_prefix: cfg.default_prefix,
+    prefix_separator: cfg.prefix_separator,
+    include_shared_agent: true,
+    skills: cfg.skills,
+    updates: { enabled: cfg.updates.enabled, interval_hours: cfg.updates.interval_hours },
+    rules: { source: cfg.rules.source },
+    agents: cfg.agents,
+    docs: {
+      source: cfg.docs.source,
+      default_target: cfg.docs.default_target,
+      index_filename: cfg.docs.index_filename,
+    },
+  };
+  return stringifyTOML(obj);
+}
+
+export interface InitConfigOptions {
+  /** When true, write a clean comment-free template instead of the documented one. */
+  noComment?: boolean;
+}
 
 /**
  * Create the config file at the default path with a commented starter
@@ -419,13 +506,18 @@ index_filename = "AGENTS.md"
  * directories for skills/rules/docs (plus `_deactivated/` under the skills
  * source). Idempotent: existing files and dirs are left as-is.
  */
-export async function initConfig(): Promise<InitConfigResult> {
+export async function initConfig(
+  options: InitConfigOptions = {},
+): Promise<InitConfigResult> {
   const configPath = getConfigPath();
   const alreadyExisted = await exists(configPath);
 
   if (!alreadyExisted) {
     await Deno.mkdir(dirname(configPath), { recursive: true });
-    await Deno.writeTextFile(configPath, STARTER_TEMPLATE);
+    const template = options.noComment
+      ? starterTemplateNoComment()
+      : STARTER_TEMPLATE_COMMENTED;
+    await Deno.writeTextFile(configPath, template);
   }
 
   const lockfilePath = getLockfilePath();
@@ -442,6 +534,11 @@ export async function initConfig(): Promise<InitConfigResult> {
     expandHome(config.rules.source),
     expandHome(config.docs.source),
   ];
+  // When the shared-agent target is opted in, materialize ~/.agents/ so the
+  // first sync isn't blocked by the parent-dir-missing safety check.
+  if (config.include_shared_agent === true) {
+    dirs.push(expandHome('~/.agents'));
+  }
   const createdDirs: string[] = [];
   for (const dir of dirs) {
     if (!(await exists(dir))) {
