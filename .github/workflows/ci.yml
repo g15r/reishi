@@ -51,7 +51,7 @@ jobs:
           deno-version: v2.x
 
       - name: Run tests
-        run: deno task test
+        run: deno task test:all
 
   build:
     name: Test cross-compile across targets
