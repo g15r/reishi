@@ -1,6 +1,6 @@
 # reishi — Agent Context Manager
 
-One collection, three constructs, every agent. Edit in one place, distribute everywhere.
+One source, three constructs, every agent. Edit in one place, sync everywhere.
 
 ## Philosophy
 
@@ -12,7 +12,7 @@ Reishi manages three types of agent context, differentiated by scope and activat
 - **Skills** — Conditionally activated context. Loaded when relevant to the task at hand. Domain expertise, tool-specific guides, framework patterns. "Load this when you need it."
 - **Docs** — Project-scoped context. Compiled into a token-efficient index per project, looked up as needed. API conventions, architecture decisions, team patterns. "This is how *this project* works."
 
-All three are markdown. All three live in a single source directory. Reishi distributes them to the right places for every configured agent. The user edits in one place and the tool handles the rest — symlinking or copying to Claude, OpenCode, or whatever comes next.
+All three are markdown. All three live in a single source. Reishi syncs them to every configured target. The user edits in one place and the tool handles the rest — symlinking or copying to Claude, OpenCode, the shared `~/.agents/` target, or whatever comes next.
 
 The goal is to make it easy to figure out what works for you and freely move context between these three roles as your understanding evolves. A skill you use every session should probably be a rule. A rule that only applies to certain projects should probably be a doc fragment. Reishi makes these transitions trivial.
 
@@ -27,39 +27,41 @@ All managed content lives in a single source directory per construct:
 
 These are where users create, edit, and customize content. They are always authoritative — reishi never writes to source directories without explicit user action.
 
-### Agents and projects
+### Agents and projects (targets)
 
-Destinations are organized into two types:
+Targets — the places reishi writes to — come in two shapes:
 
-- **Agents** — Named destinations for skills and rules. Each agent groups a `skills` path and a `rules` path (e.g. `[agents.claude]` with `skills = "~/.claude/skills"` and `rules = "~/.claude/rules"`). Use `--agents=<name>` on sync/pull to filter.
-- **Projects** — Named destinations for docs. Each project maps a name to a project root on disk (e.g. `[projects.myproject]` with `path = "~/code/myproject"`). Use `--projects=<name>` on docs sync to filter.
+- **Agents** — Named targets for skills and rules. Each agent groups a `skills` path and a `rules` path (e.g. `[agents.claude]` with `skills = "~/.claude/skills"` and `rules = "~/.claude/rules"`). Use `--agents=<name>` on sync/pull to filter.
+- **Projects** — Named targets for docs. Each project maps a name to a project root on disk (e.g. `[projects.myproject]` with `path = "~/code/myproject"`). Use `--projects=<name>` on docs sync to filter.
 
-Reishi distributes from source to these destinations automatically via copy or symlink. Destination files are overwritten on every sync. Destinations are output, not input.
+A built-in `shared` agent target points at `~/.agents/` and is opt-in via `include_shared_agent = true`. It cannot be redirected — the path is fixed by convention so any tool that reads `~/.agents/` finds the same content.
+
+Reishi syncs from source to these targets via copy or symlink. Target files are overwritten on every sync. Sources are input, targets are output.
 
 ### Tracking (skills only)
 
-A tracked skill records its GitHub origin in a lockfile (`reishi-lock.toml`) so reishi can check for upstream updates and pull fresh content. Tracking does not surrender ownership — the user's source copy is always authoritative. Tracking means "I want to know when upstream has updates," not "upstream owns this."
+A tracked skill records its remote origin in a lockfile (`reishi-lock.toml`) so reishi can check for remote updates and pull fresh content. Tracking does not surrender ownership — the user's source copy is always authoritative. Tracking means "I want to know when the remote has updates," not "the remote owns this."
 
 ### Sync vs pull
 
 Two distinct operations, deliberately separated:
 
-- **`rei sync`** — Local only, no network. Distributes source → targets for all three constructs. Fast, always safe.
-- **`rei skills pull`** — Network operation. Fetches upstream content for tracked skills from GitHub. Compares the remote HEAD SHA against the lockfile's recorded SHA. If upstream moved, downloads new content with divergence protection.
+- **`rei sync`** — Local only, no network. Syncs source → targets for all three constructs. Fast, always safe.
+- **`rei skills pull`** — Network operation. Pulls fresh content from each tracked skill's remote. Compares the remote HEAD SHA against the lockfile's recorded SHA. If the remote moved, downloads new content with divergence protection.
 
 ### Divergence protection
 
-When `rei skills pull` fetches new upstream content, each file is handled independently:
+When `rei skills pull` fetches new content from the remote, each file is handled independently:
 
-- **Unchanged locally** (file mtime <= `synced_at`): overwritten with upstream version.
-- **Modified locally** (file mtime > `synced_at`): user's version kept in place, upstream version saved as `<filename>_1.md` (incrementing `_2`, `_3` as needed).
+- **Unchanged locally** (file mtime <= `synced_at`): overwritten with the remote version.
+- **Modified locally** (file mtime > `synced_at`): user's version kept in place, the remote version saved as `<filename>_1.md` (incrementing `_2`, `_3` as needed).
 
 Pull is always safe — it never destroys user work.
 
 ### Config vs lockfile
 
 - **`config.toml`** — User-edited configuration: source paths, sync method, agent/project destinations, prefix settings, update polling. Pure preferences, no state.
-- **`reishi-lock.toml`** — Machine-managed tracking state: per-skill upstream URL, ref, subpath, prefix, SHA, `synced_at`. Written by `rei skills add -t` and `rei skills pull`.
+- **`reishi-lock.toml`** — Machine-managed tracking state: per-skill remote URL, ref, subpath, prefix, SHA, `synced_at`. Written by `rei skills add -t` and `rei skills pull`.
 
 Both live in the reishi config directory (default `~/.config/reishi/`).
 
@@ -95,8 +97,8 @@ rei skills add <github-url> [-t] [-p]     # install from GitHub
 rei skills list [-a]                      # list active (or all) skills
 rei skills activate <name>                # re-enable a deactivated skill
 rei skills deactivate <name>              # temporarily disable
-rei skills pull [name] [--dry-run] [--check]  # fetch upstream / check for updates
-rei skills sync [name] [--agents] [--method] [--dry-run] [--check]  # distribute to agents
+rei skills pull [name] [--dry-run] [--check]  # pull from remotes / check for updates
+rei skills sync [name] [--agents] [--method] [--dry-run] [--check]  # sync to agent targets
 ```
 
 #### new
@@ -129,11 +131,11 @@ rei skills add https://github.com/user/repo/tree/main/skills             # all i
 
 #### pull
 
-Fetch upstream for tracked skills with divergence protection:
+Pull tracked skills from their remotes with divergence protection:
 
 1. Fetch HEAD SHA from GitHub API (lightweight, single call per skill).
 2. Compare against lockfile SHA — skip if unchanged.
-3. If upstream moved: download tarball, extract, merge with divergence protection.
+3. If the remote moved: download tarball, extract, merge with divergence protection.
 4. Update `sha` and `synced_at` in lockfile.
 5. Auto-sync to targets.
 
@@ -144,32 +146,32 @@ Fetch upstream for tracked skills with divergence protection:
 Both `sync` and `pull` accept `--check` to inspect state without writing:
 
 - **`rei skills sync --check`** — Report per skill × agent freshness: `fresh`, `stale`, `diverged`, `missing`, `symlink`. Local only, no network.
-- **`rei skills pull --check`** — Lightweight upstream check — fetches HEAD SHA per tracked skill, reports which have updates. No downloads.
+- **`rei skills pull --check`** — Lightweight remote check — fetches HEAD SHA per tracked skill, reports which have updates. No downloads.
 
 ### rei rules
 
 Always-on, user-level agent context. Rules are the simplest construct — a folder of markdown files at `rules.source` (default `~/.config/reishi/rules/`). No tracking, no frontmatter, no conditional activation. Drop a `.md` file in the folder, sync, and it's active for every session across every agent.
 
-Users manage the files directly — create, edit, delete with their editor or filesystem tools. Reishi just lists what's there and distributes it.
+Users manage the files directly — create, edit, delete with their editor or filesystem tools. Reishi just lists what's there and syncs it to every agent target.
 
 ```bash
 rei rules list                                                      # list all rules in source
-rei rules sync [--agents=claude] [--method=symlink] [--dry-run]     # distribute to agent targets
+rei rules sync [--agents=claude] [--method=symlink] [--dry-run]     # sync to agent targets
 ```
 
 ### rei docs
 
 Project-scoped agent context. Docs are markdown fragments organized by project, compiled into a token-efficient index that agents look up as needed.
 
-Each subdirectory of `docs.source` is a project. Each `.md` file inside is a fragment. Unlike rules and skills, docs are distributed to real project directories — the compiled index lands at `<target>/<index_filename>` (default `AGENTS.md`), and fragments go under `<target>/<docs.default_target>/` (default `.agents/docs/`).
+Each subdirectory of `docs.source` is a project. Each `.md` file inside is a fragment. Unlike rules and skills, docs are synced to real project directories — the compiled index lands at `<target>/<index_filename>` (default `AGENTS.md`), and fragments go under `<target>/<docs.default_target>/` (default `.agents/docs/`).
 
-Users manage fragment files directly in the project subdirectory. Reishi handles project creation (which involves both a directory and a config entry) and distribution.
+Users manage fragment files directly in the project subdirectory. Reishi handles project creation (which involves both a directory and a config entry) and sync.
 
 ```bash
 rei docs list [project]                                     # list projects, or fragments in a project
 rei docs add <project> [--target path]                      # create project dir + config entry
 rei docs remove <project>                                   # remove config entry (prompts to also delete docs dir)
-rei docs sync [project] [--target path] [--dry-run]         # compile index + distribute fragments
+rei docs sync [project] [--target path] [--dry-run]         # compile index + sync fragments
 rei docs sync [project] --stdout                            # preview the compiled index without writing
 ```
 
@@ -212,6 +214,7 @@ Individual domain syncs are also available via `rei skills sync`, `rei rules syn
 sync_method = "copy"            # "copy" or "symlink"
 default_prefix = "infer"        # "infer" from GitHub org, or "none"
 prefix_separator = "_"
+include_shared_agent = true     # opt in to the built-in `shared` target at ~/.agents/
 
 [skills]
 source = "~/.config/reishi/skills"
@@ -255,7 +258,7 @@ agents = ["claude"]
 # ~/.config/reishi/reishi-lock.toml — managed by rei, do not edit manually
 
 [skills.readwiseio_book-review]
-source_url = "https://github.com/readwiseio/readwise-skills"
+source_url = "https://github.com/readwiseio/readwise-skills"  # remote
 subpath = "skills/book-review"
 ref = "main"
 sha = "abc123def456..."

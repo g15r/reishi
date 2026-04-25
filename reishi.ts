@@ -805,7 +805,7 @@ async function addSkill(
       `   ${dim(italic('Expected:'))} https://github.com/user/repo/tree/branch[/path]`,
     );
     console.error(
-      `   ${dim(italic('For plain repo URLs, use:'))} rei init --fork <url>`,
+      `   ${dim(italic('For plain repo URLs, use:'))} rei skills new --fork <url>`,
     );
     return false;
   }
@@ -1260,19 +1260,19 @@ const skillsCommand = new Command()
     Deno.exit(results.some((r) => r.action === 'failed') ? 1 : 0);
   })
   .command('pull [skill-name:string:active-skill]')
-  .description('Fetch upstream for tracked skills, then auto-sync to targets')
+  .description('Pull tracked skills from their remotes, then auto-sync to targets')
   .option('--agents <names:string>', 'Comma-separated agent names to sync to')
   .option('--method <method:string>', 'Override sync method: copy or symlink')
-  .option('--dry-run', 'Preview upstream diff without writing (no sync either)')
-  .option('--check', 'Check for upstream changes without fetching')
+  .option('--dry-run', 'Preview the remote diff without writing (no sync either)')
+  .option('--check', 'Check for remote changes without pulling')
   .option(
     '--prefix-change <mode:string>',
     'How to handle a changed prefix non-interactively: rename | parallel | abort',
   )
   .example('Pull all tracked skills', 'rei skills pull')
   .example('Pull one skill', 'rei skills pull book-review')
-  .example('Preview upstream changes', 'rei skills pull --dry-run')
-  .example('Check for upstream updates', 'rei skills pull --check')
+  .example('Preview remote changes', 'rei skills pull --dry-run')
+  .example('Check for remote updates', 'rei skills pull --check')
   .action(async (options, skillName) => {
     if (options.check) {
       const checks = await checkForUpdates(skillName);
@@ -1284,7 +1284,7 @@ const skillsCommand = new Command()
       } else {
         const noun = updated.length === 1 ? 'skill has' : 'skills have';
         console.log(
-          `${green('✨')} ${updated.length} ${noun} upstream updates: ${
+          `${green('✨')} ${updated.length} ${noun} remote updates: ${
             updated.map((n) => magenta(n)).join(', ')
           }`,
         );
@@ -1508,7 +1508,7 @@ cli
 // Users manage rule files directly with their editor/filesystem tools;
 // reishi only lists what's there and distributes it.
 const rulesCommand = new Command()
-  .description('Manage always-on markdown rules distributed to agent rule paths')
+  .description('Manage always-on markdown rules synced to agent targets')
   .action(function () {
     this.showHelp();
   })
@@ -1670,7 +1670,7 @@ const docsCommand = new Command()
     }
   })
   .command('sync [project:string:doc-project]')
-  .description('Compile and distribute docs for one or all configured projects')
+  .description('Compile and sync docs for one or all configured projects')
   .option('--target <path:string>', 'Override the target project root (requires <project>)')
   .option('--method <method:string>', 'Override sync method: copy or symlink')
   .option('--dry-run', 'Plan only — do not write')
