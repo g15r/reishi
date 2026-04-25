@@ -1,6 +1,6 @@
 # reishi TODO
 
-## Phase 9: 🌀 Vocabulary and Shared Agent
+## Phase 9: Vocabulary and Shared Agent ✅
 
 Two parallel foundations for the v1 release: locking down canonical terminology before writing any docs, and adding the `shared` built-in target.
 
@@ -8,58 +8,58 @@ Two parallel foundations for the v1 release: locking down canonical terminology 
 
 Define and propagate consistent language across all CLI output and docs. Core glossary: **fragments** (any individual markdown file reishi manages), **targets** (agents and projects collectively), **source** (`~/.config/reishi/` — where users work), **remotes** (where tracked skills are pulled from), **sync** (writing fragments from source to targets), **pull** (fetching from a remote).
 
-- [ ] Write a terminology reference doc at `~/.agents/docs/reishi-vocabulary.md` for use in future sessions
-- [ ] Audit existing CLI help text and agent-facing docs for non-canonical terms
-- [ ] Update help text, error messages, and agent docs to use canonical terms throughout
+- [x] Write a terminology reference doc at `~/.agents/docs/reishi-vocabulary.md` for use in future sessions
+- [x] Audit existing CLI help text and agent-facing docs for non-canonical terms
+- [x] Update help text, error messages, and agent docs to use canonical terms throughout
 
 ### Implement `shared` agent target
 
 `shared` is a built-in, non-configurable agent target that always points to `~/.agents/`. Users opt in via `include_shared_agent: true` in their config. This is set to `true` by default in `config init` output.
 
-- [ ] Write failing tests for `shared` as a built-in target at `~/.agents/` with no configurable path
-- [ ] Add `include_shared_agent` boolean to the config schema
-- [ ] Update sync logic to include `~/.agents/` when `include_shared_agent` is `true`
-- [ ] Set `include_shared_agent = true` explicitly in the `config init` default output
+- [x] Write failing tests for `shared` as a built-in target at `~/.agents/` with no configurable path
+- [x] Add `include_shared_agent` boolean to the config schema
+- [x] Update sync logic to include `~/.agents/` when `include_shared_agent` is `true`
+- [x] Set `include_shared_agent = true` explicitly in the `config init` default output
 
-## Phase 10: Config UX
+## Phase 10: Config UX ✅
 
 Ship a friendly, well-commented default config and the escape hatch for users who want it clean.
 
 ### Documented default config
 
-- [ ] Draft a commented config template written for a brand-new user reading it for the first time
-- [ ] Update `config init` to output the commented template by default
-- [ ] Use canonical vocabulary from Phase 9 throughout all comments
+- [x] Draft a commented config template written for a brand-new user reading it for the first time
+- [x] Update `config init` to output the commented template by default
+- [x] Use canonical vocabulary from Phase 9 throughout all comments
 
 ### `--no-comment` flag for `config init`
 
-- [ ] Write failing tests for `-c`/`--no-comment` flag behavior
-- [ ] Implement `-c`/`--no-comment` flag that outputs a clean, comment-free config
+- [x] Write failing tests for `-c`/`--no-comment` flag behavior
+- [x] Implement `-c`/`--no-comment` flag that outputs a clean, comment-free config
 
-## Phase 11: Open Source Documentation
+## Phase 11: Open Source Documentation ✅
 
 Three parallel deliverables. All should use Phase 9 canonical vocabulary.
 
 ### README
 
-- [ ] Audit the existing README: identify what's accurate, what's stale, and what's missing
-- [ ] Draft a structure with ToC: install, core concepts, quick start, key commands, blessed patterns, philosophy
-- [ ] Write the README — concise prose, tables for reference material, callouts for important notes
-- [ ] Add an Issues vs. Discussions section: prefer Discussions for ideas and questions; Issues only when a concrete, reproducible change can be clearly described; note that poorly-formed Issues and PRs ignoring contribution guidelines will be auto-closed — frame this warmly as care for a healthy OSS ecosystem, not gatekeeping
-- [ ] Secondary pass focused on information order: most important first, reference material last; verify all anchor links
+- [x] Audit the existing README: identify what's accurate, what's stale, and what's missing (no prior README existed; created from scratch)
+- [x] Draft a structure with ToC: install, core concepts, quick start, key commands, blessed patterns, philosophy
+- [x] Write the README — concise prose, tables for reference material, callouts for important notes
+- [x] Add an Issues vs. Discussions section: prefer Discussions for ideas and questions; Issues only when a concrete, reproducible change can be clearly described; note that poorly-formed Issues and PRs ignoring contribution guidelines will be auto-closed — frame this warmly as care for a healthy OSS ecosystem, not gatekeeping
+- [x] Secondary pass focused on information order: most important first, reference material last; verify all anchor links
 
 ### SECURITY.md
 
 Formal but minimal — reishi reads and writes markdown files and a TOML config; the main risk is users accidentally putting secrets in agent context files. Belt-and-suspenders coverage for an OSS project.
 
-- [ ] Write a brief threat model: the real risk is user error (secrets in fragments), not attack surface in the tool itself
-- [ ] Note the one meaningful vector: remote skill sources (users should only pull from remotes they trust)
-- [ ] Add vulnerability reporting instructions (GitHub private advisory or email) and expected response timeline
+- [x] Write a brief threat model: the real risk is user error (secrets in fragments), not attack surface in the tool itself
+- [x] Note the one meaningful vector: remote skill sources (users should only pull from remotes they trust)
+- [x] Add vulnerability reporting instructions (GitHub private advisory or email) and expected response timeline
 
 ### CONTRIBUTING.md and LICENSE
 
-- [ ] Add Apache 2.0 `LICENSE` file
-- [ ] Write `CONTRIBUTING.md` with these sections:
+- [x] Add Apache 2.0 `LICENSE` file
+- [x] Write `CONTRIBUTING.md` with these sections:
   - Getting started: clone, install deps, run tests, create a feature branch
   - Commit style: conventional commits only (link to spec), enforced by CI
   - History: linear history required — rebase onto main, no merge commits
