@@ -44,6 +44,7 @@
     "test:cli": "deno test --allow-read --allow-write --allow-run=deno --allow-env=HOME,TMPDIR,REISHI_CONFIG,REISHI_LOCKFILE cli_test.ts",
     "test:compile": "deno test --allow-read --allow-write --allow-run --allow-env=HOME,TMPDIR,REISHI_CONFIG,REISHI_LOCKFILE compile_test.ts",
     "test": "deno task test:unit && deno task test:add && deno task test:sync && deno task test:sync-integration && deno task test:sync-fetch && deno task test:sync-prefix && deno task test:updates && deno task test:rules && deno task test:docs && deno task test:cli && deno task test:compile",
+    "test:run": "deno run --allow-read --allow-run=deno scripts/test.ts",
     "compile": "deno compile --allow-read --allow-write --allow-env=HOME,REISHI_CONFIG,REISHI_LOCKFILE --allow-net=github.com,codeload.github.com --allow-run=tar --include assets/ --output bin/rei reishi.ts",
     "compile:all": "scripts/compile-all.sh",
     "install": "deno install --global --config=./deno.json --allow-read --allow-write --allow-env=HOME,REISHI_CONFIG,REISHI_LOCKFILE --allow-net=github.com,codeload.github.com --allow-run=tar --name rei --force reishi.ts"
