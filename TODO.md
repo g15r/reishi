@@ -73,6 +73,7 @@ Formal but minimal — reishi reads and writes markdown files and a TOML config;
 ### Expansions
 
 - [ ] TUI - terminal UI for browsing and managing your library in the terminal, probably only really viable if the tool eventually migrates to Go or Rust. The value is browsing and launching your editor and dropping back into the TUI and doing more management, or doing bulk file operations, etc. Deno is not the ideal tool for any of this.
+- [ ] fzf integration to search for skills, rules, and docs and view content or open in editor
 - [ ] Web UI — local server for browsing and managing your library visually, Deno could be good for this, but it should probably mirror the TUI experience closely, so these are post-refactor features
 - [ ] `move`, `mv` commands — rename a skill, doc or rule and update all references and configs, selected by name within the reishi source (`rei rules mv cool-rule awesome-rule` as rules are flat, `rei docs mv my-project/api` as projects are nested under `~/.config/reishi/docs`, NOTE: we idiomatically drop the `.md` extension as all files are markdown in reishi, but we accept the same path with an `.md` as well, we just use a helper to strip it whenever a command arg is a fragment)
 - [ ] config-focused `move`, `mv` commands — rename targets: agents or
