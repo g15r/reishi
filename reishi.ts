@@ -335,127 +335,6 @@ async function initSkill(
 }
 
 // ============================================================================
-// Command: init --fork
-// ============================================================================
-
-async function forkSkill(
-  skillName: string,
-  basePath: string,
-  forkUrl: string,
-): Promise<boolean> {
-  const skillDir = resolve(basePath, skillName);
-
-  const nameError = validateSkillName(skillName);
-  if (nameError) {
-    console.error(`${red('❌ Error:')} ${nameError}`);
-    return false;
-  }
-
-  // Validate GitHub URL and extract user/repo
-  const match = forkUrl.match(
-    /^https:\/\/github\.com\/([^/]+)\/([^/\s]+?)(?:\.git)?(?:\/.*)?$/,
-  );
-  if (!match) {
-    console.error(`${red('❌ Error:')} Invalid GitHub URL`);
-    console.error(
-      `   ${dim(italic('Expected format:'))} https://github.com/user/repo`,
-    );
-    return false;
-  }
-  const [, user, repo] = match;
-
-  // Check if destination already exists
-  if (await exists(skillDir)) {
-    console.error(
-      `${red('❌ Error:')} Skill directory already exists: ${magenta(skillDir)}`,
-    );
-    return false;
-  }
-
-  const downloadUrl = `https://github.com/${user}/${repo}/archive/refs/heads/main.tar.gz`;
-
-  console.log(
-    `Forking ${magenta(`${user}/${repo}`)} as skill: ${magenta(skillName)}`,
-  );
-  console.log(`${dim(italic('Location:'))} ${magenta(skillDir)}\n`);
-
-  let tmpFile: string | undefined;
-  try {
-    console.log('Downloading main branch HEAD...');
-    const response = await fetch(downloadUrl);
-
-    if (!response.ok) {
-      console.error(
-        `${red('❌ Error:')} Failed to fetch repository ${
-          dim(italic(`(HTTP ${response.status})`))
-        }`,
-      );
-      if (response.status === 404) {
-        console.error(
-          `   Repository not found or no main branch: ${magenta(forkUrl)}`,
-        );
-      }
-      return false;
-    }
-
-    await Deno.mkdir(skillDir, { recursive: true });
-
-    // Write tarball to temp file then extract (avoids streaming complexity)
-    tmpFile = await Deno.makeTempFile({ suffix: '.tar.gz' });
-    await Deno.writeFile(tmpFile, new Uint8Array(await response.arrayBuffer()));
-
-    // --strip-components=1 removes the `repo-main/` prefix GitHub adds
-    const tar = new Deno.Command('tar', {
-      args: ['xzf', tmpFile, '--strip-components=1', '-C', skillDir],
-      stderr: 'piped',
-    });
-    const { success, stderr } = await tar.output();
-
-    if (!success) {
-      const errMsg = new TextDecoder().decode(stderr);
-      console.error(`${red('❌ Error extracting archive:')} ${errMsg}`);
-      await Deno.remove(skillDir, { recursive: true });
-      return false;
-    }
-
-    console.log(
-      `${green('✅ Forked')} ${magenta(`${user}/${repo}`)} to ${magenta(skillDir)}`,
-    );
-
-    const hasSkillMd = await exists(join(skillDir, 'SKILL.md'));
-    console.log(`\n${dim(italic('Next steps:'))}`);
-    if (hasSkillMd) {
-      console.log('1. Review and edit SKILL.md to fit your needs');
-    } else {
-      console.log(
-        '1. Create SKILL.md with required frontmatter (name, description)',
-      );
-    }
-    console.log('2. Customize the skill contents for your use case');
-    console.log(
-      `3. Validate when ready: ${dim(italic('rei validate'))} ${magenta(skillDir)}`,
-    );
-
-    return true;
-  } catch (error) {
-    const message = error instanceof Error ? error.message : String(error);
-    console.error(`${red('❌ Error forking repository:')} ${message}`);
-    if (await exists(skillDir)) {
-      await Deno.remove(skillDir, { recursive: true });
-    }
-    return false;
-  } finally {
-    if (tmpFile) {
-      try {
-        await Deno.remove(tmpFile);
-      } catch {
-        /* ignore cleanup errors */
-      }
-    }
-  }
-}
-
-// ============================================================================
 // Command: validate
 // ============================================================================
 
@@ -804,9 +683,6 @@ async function addSkill(
     console.error(
       `   ${dim(italic('Expected:'))} https://github.com/user/repo/tree/branch[/path]`,
     );
-    console.error(
-      `   ${dim(italic('For plain repo URLs, use:'))} rei skills new --fork <url>`,
-    );
     return false;
   }
 
@@ -1135,25 +1011,15 @@ const skillsCommand = new Command()
   .command('new <skill-name:string>')
   .description('Scaffold a new skill from the embedded template')
   .option('-p, --path <path:string>', 'Base path for new skill (defaults to config source)')
-  .option(
-    '-f, --fork <url:string>',
-    'Use a GitHub repo as the skill basis (main branch HEAD)',
-  )
   .example('Create in default location', 'rei skills new my-new-skill')
   .example(
     'Create in custom location',
     'rei skills new my-new-skill --path skills/public',
   )
-  .example(
-    'Fork from GitHub',
-    'rei skills new my-skill --fork https://github.com/user/repo',
-  )
   .action(async (options, skillName) => {
     const sourceDir = await getSourceDir();
     const basePath = options.path ?? sourceDir;
-    const success = options.fork
-      ? await forkSkill(skillName, basePath, options.fork)
-      : await initSkill(skillName, basePath);
+    const success = await initSkill(skillName, basePath);
     if (success && resolve(basePath) === resolve(sourceDir)) {
       await syncAndReport(skillName, 'sync');
     }
