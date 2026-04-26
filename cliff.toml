@@ -32,20 +32,20 @@ filter_unconventional = true
 require_conventional = true
 split_commits = false
 commit_parsers = [
-  { message = "^feat", group = "<!-- 0 -->✨ Features", default_scope = "General" },
-  { message = "^fix", group = "<!-- 1 -->🐛 Bug Fixes" },
-  { message = "^perf", group = "<!-- 2 -->🏎️ Performance" },
-  { message = "^refactor", group = "<!-- 3 -->♻️ Refactor" },
-  { message = "^test", group = "<!-- 5 -->🧪 Testing" },
-  { message = "^agent", group = "<!-- 6 -->🤖 Coding Agents", default_scope = "Config" },
+  { message = "^feat", group = "<!-- 01 -->✨ Features", default_scope = "General" },
+  { message = "^fix", group = "<!-- 02 -->🐛 Bug Fixes" },
+  { body = ".*security", group = "<!-- 03 -->🛡️ Security" },
+  { message = "^perf", group = "<!-- 04 -->🏎️ Performance" },
+  { message = "^refactor", group = "<!-- 05 -->♻️ Refactor" },
+  { message = "^test", group = "<!-- 06 -->🧪 Testing" },
+  { message = "^agent", group = "<!-- 07 -->🤖 Coding Agents", default_scope = "Config" },
   { message = "^docs\\(todo\\)", skip = true },
-  { message = "^docs", group = "<!-- 7 -->📚 Documentation", default_scope = "Unscoped" },
-  { message = "^build", group = "<!-- 8 -->🛠️ Build System" },
-  { message = "^ci", group = "<!-- 9 -->🚧 CI/CD", default_scope = "GitHub Actions" },
-  { message = "^style", group = "<!-- 10 -->🎨 Style & Formatting" },
+  { message = "^docs", group = "<!-- 08 -->📚 Documentation", default_scope = "Unscoped" },
+  { message = "^build", group = "<!-- 09 -->🛠️ Build System" },
+  { message = "^ci", group = "<!-- 10 -->🚧 CI/CD", default_scope = "GitHub Actions" },
+  { message = "^style", group = "<!-- 11 -->🎨 Style & Formatting" },
   { message = "^chore\\(release\\): update changelog", skip = true },
-  { message = "^chore", group = "<!-- 11 -->🧰 Tooling & Tasks" },
-  { body = ".*security", group = "<!-- 4 -->🛡️ Security" },
+  { message = "^chore", group = "<!-- 12 -->🧰 Tooling & Tasks" },
 ]
 filter_commits = true
 fail_on_unmatched_commit = true
