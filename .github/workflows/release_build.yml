@@ -59,4 +59,4 @@ jobs:
           target_linux_amd64: true
           target_linux_arm64: true
           update_readme_table: true
-          github_token: ${{ secrets.HOMEBREW_TAP_GITHUB_TOKEN }}
+          github_token: ${{ secrets.ORG_ACTIONS_TOKEN }}
