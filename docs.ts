@@ -22,6 +22,7 @@ import { parse as parseYAML } from '@std/yaml';
 import { dirname, extname, join, relative, resolve } from '@std/path';
 import { copy, exists } from '@std/fs';
 import { dim, green, italic, magenta, red, yellow } from '@std/fmt/colors';
+import { isAbsolute, resolve as resolvePath } from '@std/path';
 import {
   type DocsProjectEntry,
   expandHome,
@@ -122,6 +123,31 @@ export interface AddDocProjectOptions {
   force?: boolean;
 }
 
+/**
+ * Normalize a user-supplied project root path:
+ *   1. `~`-prefixed paths pass through unchanged.
+ *   2. Relative paths are resolved against `cwd` to absolute.
+ *   3. Absolute paths under `home` are condensed to `~/rest/of/path`.
+ *   4. Anything else stays absolute.
+ *
+ * Pure function — exported for unit tests. Real usage reads `home` from $HOME
+ * and `cwd` from `Deno.cwd()`.
+ */
+export function normalizeProjectPath(
+  input: string,
+  home: string,
+  cwd: string,
+): string {
+  const trimmed = input.trim();
+  if (trimmed === '') return '';
+  if (trimmed === '~' || trimmed.startsWith('~/')) return trimmed;
+
+  const abs = isAbsolute(trimmed) ? trimmed : resolvePath(cwd, trimmed);
+  if (abs === home) return '~';
+  if (abs.startsWith(home + '/')) return '~/' + abs.slice(home.length + 1);
+  return abs;
+}
+
 export interface AddDocProjectResult {
   sourceDir: string;
   /** True when the `[docs.projects.<name>]` entry was newly written. */
@@ -150,7 +176,12 @@ export async function addDocProject(
   const projects = config.projects ?? {};
   const alreadyInConfig = Boolean(projects[name]);
   if (!alreadyInConfig) {
-    projects[name] = options.target ? { path: options.target } : { path: '' };
+    let path = '';
+    if (options.target) {
+      const home = Deno.env.get('HOME') ?? '';
+      path = normalizeProjectPath(options.target, home, Deno.cwd());
+    }
+    projects[name] = { path };
     config.projects = projects;
     await saveConfig(config);
   }

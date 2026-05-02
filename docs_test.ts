@@ -11,12 +11,14 @@ import { exists } from '@std/fs';
 import { parse as parseTOML, stringify as stringifyTOML } from '@std/toml';
 import { resetPathCache } from './paths.ts';
 import {
+  addDocProject,
   compileIndex,
   compileToTarget,
   getDocProjectNames,
   getFragmentNames,
   listDocProjects,
   listFragments,
+  normalizeProjectPath,
   syncDocs,
 } from './docs.ts';
 import {
@@ -157,6 +159,94 @@ Deno.test('listFragments: missing project returns empty', async () => {
 
 // Fragment-level add/remove tests retired in Phase 7: users manage fragment
 // files directly. Project-level CRUD lives in addDocProject/removeDocProject.
+
+// ============================================================================
+// normalizeProjectPath — relative→abs, condense $HOME→~
+// ============================================================================
+
+Deno.test('normalizeProjectPath: ~-prefixed path passes through', () => {
+  assertEquals(
+    normalizeProjectPath('~/code/winnie-sh', '/Users/winnie', '/cwd'),
+    '~/code/winnie-sh',
+  );
+  assertEquals(normalizeProjectPath('~', '/Users/winnie', '/cwd'), '~');
+});
+
+Deno.test('normalizeProjectPath: relative path under HOME is condensed', () => {
+  assertEquals(
+    normalizeProjectPath('.', '/Users/winnie', '/Users/winnie/dev/winnie-sh'),
+    '~/dev/winnie-sh',
+  );
+  assertEquals(
+    normalizeProjectPath('./sub', '/Users/winnie', '/Users/winnie/dev'),
+    '~/dev/sub',
+  );
+  assertEquals(
+    normalizeProjectPath('foo', '/Users/winnie', '/Users/winnie'),
+    '~/foo',
+  );
+});
+
+Deno.test('normalizeProjectPath: absolute path under HOME is condensed', () => {
+  assertEquals(
+    normalizeProjectPath('/Users/winnie/dev/winnie-sh', '/Users/winnie', '/cwd'),
+    '~/dev/winnie-sh',
+  );
+  assertEquals(
+    normalizeProjectPath('/Users/winnie', '/Users/winnie', '/cwd'),
+    '~',
+  );
+});
+
+Deno.test('normalizeProjectPath: absolute path outside HOME stays absolute', () => {
+  assertEquals(
+    normalizeProjectPath('/srv/code/proj', '/Users/winnie', '/cwd'),
+    '/srv/code/proj',
+  );
+});
+
+Deno.test('normalizeProjectPath: relative path outside HOME stays absolute', () => {
+  assertEquals(
+    normalizeProjectPath('.', '/Users/winnie', '/srv/work'),
+    '/srv/work',
+  );
+});
+
+Deno.test('normalizeProjectPath: paths sharing HOME prefix but not under it', () => {
+  // /Users/winnie-other should NOT be condensed when home is /Users/winnie.
+  assertEquals(
+    normalizeProjectPath('/Users/winnie-other/foo', '/Users/winnie', '/cwd'),
+    '/Users/winnie-other/foo',
+  );
+});
+
+// ============================================================================
+// addDocProject — end-to-end path normalization through to config
+// ============================================================================
+
+Deno.test('addDocProject: relative target is normalized to ~/-prefixed when under HOME', async () => {
+  const env = await setupIsolatedEnv();
+  try {
+    const cwd = join(env.home, 'projects', 'thing');
+    await Deno.mkdir(cwd, { recursive: true });
+    await withEnv(env.env, async () => {
+      const prevCwd = Deno.cwd();
+      Deno.chdir(cwd);
+      try {
+        await addDocProject('thing', { target: '.' });
+      } finally {
+        Deno.chdir(prevCwd);
+      }
+      const raw = await Deno.readTextFile(env.configPath);
+      const cfg = parseTOML(raw) as {
+        projects?: Record<string, { path?: string }>;
+      };
+      assertEquals(cfg.projects?.thing?.path, '~/projects/thing');
+    });
+  } finally {
+    await env.cleanup();
+  }
+});
 
 // ============================================================================
 // Completion helpers
