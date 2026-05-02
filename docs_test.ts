@@ -158,7 +158,7 @@ Deno.test('listFragments: missing project returns empty', async () => {
 });
 
 // Fragment-level add/remove tests retired in Phase 7: users manage fragment
-// files directly. Project-level CRUD lives in addDocProject/removeDocProject.
+// files directly. Project-level CRUD lives in addDocProject/unlinkProject.
 
 // ============================================================================
 // normalizeProjectPath — relative→abs, condense $HOME→~

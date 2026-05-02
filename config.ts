@@ -303,6 +303,54 @@ export async function saveConfig(config: ConfigSchema): Promise<void> {
 }
 
 // ============================================================================
+// Unlink (drop config entries)
+// ============================================================================
+
+export interface UnlinkResult {
+  /** True when the entry was present and removed. */
+  removedFromConfig: boolean;
+  /**
+   * Set when unlinking the built-in `shared` agent: instead of a `[agents.*]`
+   * mutation, the opt-in flag is flipped off.
+   */
+  toggledSharedAgent?: boolean;
+}
+
+/**
+ * Drop `[agents.<name>]` from the config. The built-in `shared` agent has
+ * no `[agents.*]` entry to drop — instead, `include_shared_agent` is set to
+ * false (which makes `loadConfig` stop synthesizing it).
+ */
+export async function unlinkAgent(name: string): Promise<UnlinkResult> {
+  const config = await loadConfig();
+  if (name === SHARED_AGENT_NAME) {
+    if (config.include_shared_agent !== true) {
+      return { removedFromConfig: false, toggledSharedAgent: true };
+    }
+    config.include_shared_agent = false;
+    // Strip the synthesized entry before saving so loadConfig can rebuild it
+    // cleanly next time include_shared_agent flips back on.
+    if (config.agents && SHARED_AGENT_NAME in config.agents) {
+      const next = { ...config.agents };
+      delete next[SHARED_AGENT_NAME];
+      config.agents = next;
+    }
+    await saveConfig(config);
+    return { removedFromConfig: true, toggledSharedAgent: true };
+  }
+
+  const agents = config.agents ?? {};
+  if (!(name in agents)) {
+    return { removedFromConfig: false };
+  }
+  const next = { ...agents };
+  delete next[name];
+  config.agents = next;
+  await saveConfig(config);
+  return { removedFromConfig: true };
+}
+
+// ============================================================================
 // Lockfile
 // ============================================================================
 

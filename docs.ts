@@ -188,12 +188,12 @@ export async function addDocProject(
   return { sourceDir: dir, configWritten: !alreadyInConfig };
 }
 
-export interface RemoveDocProjectOptions {
+export interface UnlinkProjectOptions {
   /** Delete the source dir too; when false, only the config entry is removed. */
   deleteSourceDir?: boolean;
 }
 
-export interface RemoveDocProjectResult {
+export interface UnlinkProjectResult {
   sourceDir: string;
   removedFromConfig: boolean;
   sourceDirRemoved: boolean;
@@ -204,10 +204,10 @@ export interface RemoveDocProjectResult {
  * entry. Deletes the `<docs.source>/<name>/` directory only when explicitly
  * requested — the CLI handles the two-step confirmation prompt.
  */
-export async function removeDocProject(
+export async function unlinkProject(
   name: string,
-  options: RemoveDocProjectOptions = {},
-): Promise<RemoveDocProjectResult> {
+  options: UnlinkProjectOptions = {},
+): Promise<UnlinkProjectResult> {
   const config = await loadConfig();
   const projects = config.projects ?? {};
   const hadEntry = Boolean(projects[name]);
@@ -242,7 +242,7 @@ export async function getFragmentNames(project: string): Promise<string[]> {
 
 // Fragment-level add/remove retired in Phase 7: users manage fragment files
 // directly. `rei docs add/remove` now operates at the project level — see
-// addDocProject / removeDocProject above.
+// addDocProject / unlinkProject above.
 
 // ============================================================================
 // Index compilation

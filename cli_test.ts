@@ -430,6 +430,180 @@ Deno.test('config: init --no-example skips the example file', async () => {
   }
 });
 
+// ============================================================================
+// config unlink
+// ============================================================================
+
+async function seedConfig(
+  configPath: string,
+  body: string,
+): Promise<void> {
+  await Deno.mkdir(join(configPath, '..'), { recursive: true });
+  await Deno.writeTextFile(configPath, body);
+}
+
+Deno.test('config unlink agent: drops [agents.<name>]', async () => {
+  const home = await Deno.makeTempDir({ prefix: 'reishi-config-' });
+  try {
+    const configPath = join(home, '.config', 'reishi', 'config.toml');
+    await seedConfig(
+      configPath,
+      [
+        'sync_method = "copy"',
+        'default_prefix = "none"',
+        'prefix_separator = "_"',
+        '',
+        '[skills]',
+        `source = "${join(home, 'skills')}"`,
+        '',
+        '[rules]',
+        `source = "${join(home, 'rules')}"`,
+        '',
+        '[docs]',
+        `source = "${join(home, 'docs')}"`,
+        'default_target = ".agents/docs"',
+        'index_filename = "AGENTS.md"',
+        '',
+        '[agents.claude]',
+        `skills = "${join(home, '.claude/skills')}"`,
+        `rules = "${join(home, '.claude/rules')}"`,
+        '',
+        '[agents.opencode]',
+        `skills = "${join(home, '.opencode/skills')}"`,
+        `rules = "${join(home, '.opencode/rules')}"`,
+        '',
+      ].join('\n'),
+    );
+    const r = await runrei(['config', 'unlink', 'agent', 'opencode', '--force'], {
+      env: { HOME: home, REISHI_CONFIG: configPath },
+    });
+    assertEquals(r.code, 0, `stderr=${r.stderr}`);
+    assertStringIncludes(r.stdout, 'Unlinked agent');
+    const after = await Deno.readTextFile(configPath);
+    assert(
+      !/\[agents\.opencode\]/.test(after),
+      `expected [agents.opencode] to be gone; got:\n${after}`,
+    );
+    assert(
+      /\[agents\.claude\]/.test(after),
+      `expected [agents.claude] to remain; got:\n${after}`,
+    );
+  } finally {
+    await Deno.remove(home, { recursive: true });
+  }
+});
+
+Deno.test('config unlink agent: missing name shows usage and lists agents', async () => {
+  const home = await Deno.makeTempDir({ prefix: 'reishi-config-' });
+  try {
+    const configPath = join(home, '.config', 'reishi', 'config.toml');
+    await seedConfig(
+      configPath,
+      [
+        'sync_method = "copy"',
+        'default_prefix = "none"',
+        'prefix_separator = "_"',
+        '[skills]',
+        `source = "${join(home, 'skills')}"`,
+        '[rules]',
+        `source = "${join(home, 'rules')}"`,
+        '[docs]',
+        `source = "${join(home, 'docs')}"`,
+        'default_target = ".agents/docs"',
+        'index_filename = "AGENTS.md"',
+        '[agents.claude]',
+        `skills = "${join(home, '.claude/skills')}"`,
+        `rules = "${join(home, '.claude/rules')}"`,
+      ].join('\n'),
+    );
+    const r = await runrei(['config', 'unlink', 'agent'], {
+      env: { HOME: home, REISHI_CONFIG: configPath },
+    });
+    assertEquals(r.code, 0, `stderr=${r.stderr}`);
+    assertStringIncludes(r.stdout, 'rei config unlink agent <name>');
+    assertStringIncludes(r.stdout, 'claude');
+  } finally {
+    await Deno.remove(home, { recursive: true });
+  }
+});
+
+Deno.test('config unlink agent shared: flips include_shared_agent off', async () => {
+  const home = await Deno.makeTempDir({ prefix: 'reishi-config-' });
+  try {
+    const configPath = join(home, '.config', 'reishi', 'config.toml');
+    await seedConfig(
+      configPath,
+      [
+        'sync_method = "copy"',
+        'default_prefix = "none"',
+        'prefix_separator = "_"',
+        'include_shared_agent = true',
+        '[skills]',
+        `source = "${join(home, 'skills')}"`,
+        '[rules]',
+        `source = "${join(home, 'rules')}"`,
+        '[docs]',
+        `source = "${join(home, 'docs')}"`,
+        'default_target = ".agents/docs"',
+        'index_filename = "AGENTS.md"',
+      ].join('\n'),
+    );
+    const r = await runrei(['config', 'unlink', 'agent', 'shared', '--force'], {
+      env: { HOME: home, REISHI_CONFIG: configPath },
+    });
+    assertEquals(r.code, 0, `stderr=${r.stderr}`);
+    const after = await Deno.readTextFile(configPath);
+    assert(
+      /include_shared_agent\s*=\s*false/.test(after),
+      `expected include_shared_agent = false; got:\n${after}`,
+    );
+  } finally {
+    await Deno.remove(home, { recursive: true });
+  }
+});
+
+Deno.test('config unlink project: drops [projects.<name>] and optionally cleans source', async () => {
+  const home = await Deno.makeTempDir({ prefix: 'reishi-config-' });
+  try {
+    const configPath = join(home, '.config', 'reishi', 'config.toml');
+    const docsSource = join(home, 'docs');
+    const projectSourceDir = join(docsSource, 'mything');
+    await Deno.mkdir(projectSourceDir, { recursive: true });
+    await Deno.writeTextFile(join(projectSourceDir, 'a.md'), '# a\n');
+    await seedConfig(
+      configPath,
+      [
+        'sync_method = "copy"',
+        'default_prefix = "none"',
+        'prefix_separator = "_"',
+        '[skills]',
+        `source = "${join(home, 'skills')}"`,
+        '[rules]',
+        `source = "${join(home, 'rules')}"`,
+        '[docs]',
+        `source = "${docsSource}"`,
+        'default_target = ".agents/docs"',
+        'index_filename = "AGENTS.md"',
+        '[agents.claude]',
+        `skills = "${join(home, '.claude/skills')}"`,
+        `rules = "${join(home, '.claude/rules')}"`,
+        '[projects.mything]',
+        `path = "${join(home, 'code/mything')}"`,
+      ].join('\n'),
+    );
+    const r = await runrei(
+      ['config', 'unlink', 'project', 'mything', '--force', '--clean'],
+      { env: { HOME: home, REISHI_CONFIG: configPath } },
+    );
+    assertEquals(r.code, 0, `stderr=${r.stderr}`);
+    const after = await Deno.readTextFile(configPath);
+    assert(!/\[projects\.mything\]/.test(after));
+    assert(!(await exists(projectSourceDir)), 'source dir should be removed with --clean');
+  } finally {
+    await Deno.remove(home, { recursive: true });
+  }
+});
+
 Deno.test('config: init does not recreate example_config.toml if user deleted it', async () => {
   const configHome = await Deno.makeTempDir({ prefix: 'reishi-config-' });
   try {

@@ -29,7 +29,9 @@ import {
   loadLockfile,
   saveConfig,
   saveLockfile,
+  SHARED_AGENT_NAME,
   type SkillLockEntry,
+  unlinkAgent,
 } from './config.ts';
 import { getDeactivatedDir, getSourceDir } from './paths.ts';
 import {
@@ -59,7 +61,7 @@ import {
   getDocProjectNames,
   listDocProjects,
   listFragments,
-  removeDocProject,
+  unlinkProject,
   syncDocs,
 } from './docs.ts';
 
@@ -1006,7 +1008,11 @@ const cli = new Command()
   .globalComplete('active-skill', () => getActiveSkillNames())
   .globalComplete('deactivated-skill', () => getDeactivatedSkillNames())
   .globalComplete('rule-name', () => getRuleNames())
-  .globalComplete('doc-project', () => getDocProjectNames());
+  .globalComplete('doc-project', () => getDocProjectNames())
+  .globalComplete('agent-name', async () => {
+    const cfg = await loadConfig();
+    return Object.keys(cfg.agents ?? {}).sort();
+  });
 
 // Skills command (parent for: new, validate, add, list, activate, deactivate,
 // sync, pull, status, updates)
@@ -1251,7 +1257,137 @@ function printPullSummary(results: PullSkillResult[]): void {
   }
 }
 
-// Config command (with subcommands: init, show, path)
+// Config unlink — drop an agent or project entry from config. Project unlink
+// also offers to clean up the source dir; agent unlink is config-only (the
+// 'shared' agent flips include_shared_agent off instead of mutating agents.*).
+const unlinkAgentCmd = new Command()
+  .description('Drop an [agents.<name>] entry from config')
+  .complete('agent-name', async () => {
+    const cfg = await loadConfig();
+    return Object.keys(cfg.agents ?? {}).sort();
+  })
+  .arguments('[name:string:agent-name]')
+  .option('--force', 'Skip the confirmation prompt')
+  .example('Unlink an agent', 'rei config unlink agent claude')
+  .action(async (options, name) => {
+    const cfg = await loadConfig();
+    const agents = Object.keys(cfg.agents ?? {}).sort();
+    if (!name) {
+      console.log(`${dim('Usage:')} rei config unlink agent <name>`);
+      if (agents.length === 0) {
+        console.log(`${dim(italic('No agents configured.'))}`);
+      } else {
+        console.log(`\n${dim('Configured agents:')}`);
+        for (const a of agents) console.log(`  ${magenta(a)}`);
+      }
+      Deno.exit(0);
+    }
+    if (!options.force) {
+      const ok = await promptYesNoCli(
+        `Unlink agent '${name}' from config? (y/N)`,
+      );
+      if (!ok) {
+        console.log(`${yellow('Aborted.')}`);
+        Deno.exit(0);
+      }
+    }
+    try {
+      const result = await unlinkAgent(name);
+      if (!result.removedFromConfig) {
+        console.log(
+          `${yellow('⚠ No agent')} ${magenta(name)} ${
+            dim(italic('(nothing to unlink)'))
+          }`,
+        );
+      } else if (result.toggledSharedAgent) {
+        console.log(
+          `${green('✅ Disabled')} ${magenta(SHARED_AGENT_NAME)} ${
+            dim(italic('(set include_shared_agent = false)'))
+          }`,
+        );
+      } else {
+        console.log(`${green('✅ Unlinked agent')} ${magenta(name)}`);
+      }
+      Deno.exit(0);
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      console.error(`${red('❌ Error:')} ${message}`);
+      Deno.exit(1);
+    }
+  });
+
+const unlinkProjectCmd = new Command()
+  .description('Drop a [projects.<name>] entry, optionally removing the source dir')
+  .complete('doc-project', () => getDocProjectNames())
+  .arguments('[name:string:doc-project]')
+  .option('--force', 'Skip the confirmation prompts')
+  .option('--clean', 'Also delete the docs source dir for the project')
+  .example('Unlink a project', 'rei config unlink project myproject')
+  .action(async (options, name) => {
+    const cfg = await loadConfig();
+    const projects = Object.keys(cfg.projects ?? {}).sort();
+    if (!name) {
+      console.log(`${dim('Usage:')} rei config unlink project <name>`);
+      if (projects.length === 0) {
+        console.log(`${dim(italic('No projects configured.'))}`);
+      } else {
+        console.log(`\n${dim('Configured projects:')}`);
+        for (const p of projects) console.log(`  ${magenta(p)}`);
+      }
+      Deno.exit(0);
+    }
+    if (!options.force) {
+      const ok = await promptYesNoCli(
+        `Unlink project '${name}' from config? (y/N)`,
+      );
+      if (!ok) {
+        console.log(`${yellow('Aborted.')}`);
+        Deno.exit(0);
+      }
+    }
+    let deleteSourceDir = options.clean === true;
+    if (!deleteSourceDir && !options.force) {
+      deleteSourceDir = await promptYesNoCli(
+        `Also delete docs source directory for '${name}'? (y/N)`,
+      );
+    }
+    try {
+      const result = await unlinkProject(name, { deleteSourceDir });
+      if (!result.removedFromConfig) {
+        console.log(
+          `${yellow('⚠ No project')} ${magenta(name)} ${
+            dim(italic('(nothing to unlink)'))
+          }`,
+        );
+      } else {
+        console.log(`${green('✅ Unlinked project')} ${magenta(name)}`);
+      }
+      if (result.sourceDirRemoved) {
+        console.log(
+          `${green('🗑  Deleted source dir')} ${magenta(result.sourceDir)}`,
+        );
+      } else if (deleteSourceDir) {
+        console.log(
+          `${dim(italic('Source dir not present:'))} ${magenta(result.sourceDir)}`,
+        );
+      }
+      Deno.exit(0);
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      console.error(`${red('❌ Error:')} ${message}`);
+      Deno.exit(1);
+    }
+  });
+
+const unlinkCommand = new Command()
+  .description('Remove an agent or project entry from config')
+  .action(function () {
+    this.showHelp();
+  })
+  .command('agent', unlinkAgentCmd)
+  .command('project', unlinkProjectCmd);
+
+// Config command (with subcommands: init, show, path, unlink)
 const configCommand = new Command()
   .description('Inspect and manage reishi config')
   .action(function () {
@@ -1285,7 +1421,8 @@ const configCommand = new Command()
   .action(() => {
     const success = configPath();
     Deno.exit(success ? 0 : 1);
-  });
+  })
+  .command('unlink', unlinkCommand);
 
 cli.command('config', configCommand);
 
@@ -1485,53 +1622,6 @@ const docsCommand = new Command()
           `   ${dim(italic('Tip: set'))} [projects.${project}].path ${
             dim(italic('in config.toml to enable sync'))
           }`,
-        );
-      }
-      Deno.exit(0);
-    } catch (error) {
-      const message = error instanceof Error ? error.message : String(error);
-      console.error(`${red('❌ Error:')} ${message}`);
-      Deno.exit(1);
-    }
-  })
-  .command('remove <project:string:doc-project>')
-  .alias('rm')
-  .description('Remove a doc project — two-step: config entry, then optionally source dir')
-  .option('--force', 'Skip the config-entry confirmation prompt')
-  .option('--delete-source', 'Also delete the source dir (default: keep it)')
-  .example('Remove a project', 'rei docs remove myproject')
-  .action(async (options, project) => {
-    // Step 1: confirm config-entry removal.
-    if (!options.force) {
-      const ok = await promptYesNoCli(
-        `Remove docs project '${project}' from config? (y/N)`,
-      );
-      if (!ok) {
-        console.log(`${yellow('Aborted.')}`);
-        Deno.exit(0);
-      }
-    }
-    // Step 2: decide about the source dir.
-    let deleteSourceDir = options.deleteSource === true;
-    if (!deleteSourceDir && !options.force) {
-      deleteSourceDir = await promptYesNoCli(
-        `Also delete source directory for '${project}'? (y/N)`,
-      );
-    }
-    try {
-      const result = await removeDocProject(project, { deleteSourceDir });
-      if (!result.removedFromConfig) {
-        console.log(
-          `${yellow('⚠ No config entry for')} ${magenta(project)} ${dim(italic('(nothing to remove)'))}`,
-        );
-      } else {
-        console.log(`${green('✅ Removed config entry')} ${magenta(project)}`);
-      }
-      if (result.sourceDirRemoved) {
-        console.log(`${green('🗑  Deleted source dir')} ${magenta(result.sourceDir)}`);
-      } else if (deleteSourceDir) {
-        console.log(
-          `${dim(italic('Source dir not present:'))} ${magenta(result.sourceDir)}`,
         );
       }
       Deno.exit(0);
