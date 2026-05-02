@@ -920,9 +920,9 @@ export { addSkill };
 // Command: config
 // ============================================================================
 
-async function configInit(noComment = false): Promise<boolean> {
+async function configInit(noExample = false): Promise<boolean> {
   try {
-    const result = await initConfig({ noComment });
+    const result = await initConfig({ noExample });
     if (result.alreadyExisted) {
       console.log(
         `${yellow('🚧 Config already exists at')} ${magenta(result.configPath)}`,
@@ -933,6 +933,13 @@ async function configInit(noComment = false): Promise<boolean> {
       return true;
     }
     console.log(`${green('✅ Created config')} ${magenta(result.configPath)} 🌀`);
+    if (result.exampleWritten) {
+      console.log(
+        `${green('✅ Wrote reference')} ${magenta(result.examplePath)} ${
+          dim(italic('(commented; safe to delete once you are oriented)'))
+        }`,
+      );
+    }
     for (const dir of result.createdDirs) {
       console.log(`${green('✅ Created directory')} ${magenta(dir)}`);
     }
@@ -1253,17 +1260,16 @@ const configCommand = new Command()
   .command('init')
   .description('Create the reishi config file and source directories')
   .option(
-    '-c, --no-comment',
-    'Write a clean comment-free config (skip the documented starter template)',
+    '--no-example',
+    'Skip writing the heavily-commented example_config.toml reference',
   )
   .example('Initialize config', 'rei config init')
-  .example('Initialize without comments', 'rei config init -c')
+  .example('Initialize without the example reference', 'rei config init --no-example')
   .action(async (options) => {
-    // Cliffy quirk: `-c` exposes `noComment: true`; the long form `--no-comment`
-    // exposes `comment: false`. Either signals "skip the commented template".
-    const opts = options as { noComment?: boolean; comment?: boolean };
-    const noComment = opts.noComment === true || opts.comment === false;
-    const success = await configInit(noComment);
+    // Cliffy: `--no-example` flips `example: false`.
+    const opts = options as { example?: boolean };
+    const noExample = opts.example === false;
+    const success = await configInit(noExample);
     Deno.exit(success ? 0 : 1);
   })
   .command('show')

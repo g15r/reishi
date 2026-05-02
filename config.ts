@@ -148,6 +148,8 @@ export interface LockfileSchema {
 export interface InitConfigResult {
   alreadyExisted: boolean;
   configPath: string;
+  examplePath: string;
+  exampleWritten: boolean;
   createdDirs: string[];
 }
 
@@ -354,11 +356,13 @@ export async function saveLockfile(lockfile: LockfileSchema): Promise<void> {
 // Init
 // ============================================================================
 
-const STARTER_TEMPLATE_COMMENTED = `# ~/.config/reishi/config.toml
+const EXAMPLE_TEMPLATE_COMMENTED = `# example_config.toml — reference template
 #
-# Welcome to reishi. This config maps your authoring source (where you edit
-# rules, skills, and docs) to the targets reishi syncs to (your agents and
-# projects). Edit values inline; comments are for orientation, not parsing.
+# This file is a heavily-commented reference. Reishi does NOT read it; the
+# live config lives next to it as \`config.toml\`. Treat this as a cheat sheet:
+# copy values you want into config.toml, or delete this file once you know
+# your way around. Paths in this file use \`/path/to/...\` placeholders to
+# avoid being mistaken for real settings.
 #
 # Vocabulary cheat sheet:
 #   fragment  — any single markdown file reishi manages
@@ -465,17 +469,16 @@ index_filename = "AGENTS.md"
 # Each project maps a name to a project root on disk. \`fragments\` is
 # optional; when omitted, every fragment under <docs.source>/<name>/ is
 # included. Use \`rei docs add <name> --target <path>\` to create one.
-# [projects.myproject]
-# path = "~/code/myproject"
+# [projects.example]
+# path = "/path/to/your/project"
 # fragments = ["api-conventions.md", "testing.md"]
 `;
 
 /**
- * Build the comment-free starter template by serializing the canonical
- * defaults plus the opt-ins the commented template ships with. Keeps the
- * two outputs in lockstep so toggling `--no-comment` only strips comments.
+ * Serialize the canonical defaults (plus shared-agent opt-in) as a clean,
+ * comment-free TOML document — the format used for the live `config.toml`.
  */
-function starterTemplateNoComment(): string {
+function minimalConfigTemplate(): string {
   const cfg = defaultConfig();
   const obj: Record<string, unknown> = {
     sync_method: cfg.sync_method,
@@ -496,28 +499,43 @@ function starterTemplateNoComment(): string {
 }
 
 export interface InitConfigOptions {
-  /** When true, write a clean comment-free template instead of the documented one. */
-  noComment?: boolean;
+  /** When true, skip writing the heavily-commented `example_config.toml`. */
+  noExample?: boolean;
 }
 
 /**
- * Create the config file at the default path with a commented starter
- * template, write an empty lockfile alongside it, and create the source
- * directories for skills/rules/docs (plus `_deactivated/` under the skills
- * source). Idempotent: existing files and dirs are left as-is.
+ * Resolve the path to `example_config.toml`, sited next to the live config.
+ */
+export function getExampleConfigPath(): string {
+  return join(dirname(getConfigPath()), 'example_config.toml');
+}
+
+/**
+ * Create the live `config.toml` (minimal, comment-free) and, alongside it,
+ * a heavily-commented `example_config.toml` reference (skippable with
+ * `noExample`). Also writes an empty lockfile and creates the source
+ * directories for skills/rules/docs (plus `_deactivated/` under skills).
+ *
+ * Idempotent: existing files are left alone. In particular, the example
+ * file is only written on first init — once a user deletes it, subsequent
+ * inits don't recreate it.
  */
 export async function initConfig(
   options: InitConfigOptions = {},
 ): Promise<InitConfigResult> {
   const configPath = getConfigPath();
+  const examplePath = getExampleConfigPath();
   const alreadyExisted = await exists(configPath);
 
   if (!alreadyExisted) {
     await Deno.mkdir(dirname(configPath), { recursive: true });
-    const template = options.noComment
-      ? starterTemplateNoComment()
-      : STARTER_TEMPLATE_COMMENTED;
-    await Deno.writeTextFile(configPath, template);
+    await Deno.writeTextFile(configPath, minimalConfigTemplate());
+  }
+
+  let exampleWritten = false;
+  if (!alreadyExisted && !options.noExample && !(await exists(examplePath))) {
+    await Deno.writeTextFile(examplePath, EXAMPLE_TEMPLATE_COMMENTED);
+    exampleWritten = true;
   }
 
   const lockfilePath = getLockfilePath();
@@ -547,5 +565,5 @@ export async function initConfig(
     }
   }
 
-  return { alreadyExisted, configPath, createdDirs };
+  return { alreadyExisted, configPath, examplePath, exampleWritten, createdDirs };
 }
