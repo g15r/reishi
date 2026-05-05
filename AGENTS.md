@@ -1,239 +1,79 @@
 # reishi — Agent Context Manager
 
-One source, three constructs, every agent. Edit in one place, sync everywhere.
+A Deno CLI that manages markdown agent context (rules, skills, docs) from a single source and syncs it to every configured agent target.
 
-## Philosophy
+## Specs and project state
 
-Most agent tooling focuses on rigid plugin systems and skill marketplaces. Reishi takes a different approach: all agent context is markdown, and the value comes from clarity about *when* that context is active, not from complex packaging or distribution systems.
+This project follows the **SPOT** convention (Spec, Phases, Objectives, Tasks):
 
-Reishi manages three types of agent context, differentiated by scope and activation:
+- `SPEC.md` — project contract: vibe, non-goals, vocabulary, project-scope requirements (`R001+`), Backlog, Meta. `@`-imports the domain specs below.
+- `specs/<dom>-<slug>.md` — durable per-domain specs with stable IDs (`cf-`, `sk-`, `ru-`, `dc-`, `sy-`). The contract for everything reishi does.
+- `TODO.md` — active Phases. Each Phase header carries a `**Requirements**:` line referencing IDs from the specs.
+- `DONE.md` — shipped Phases, with rationale and the same requirement-ID footers.
 
-- **Rules** — Always-on, user-level context. Loaded at the start of every session. Style preferences, safety guidelines, workflow patterns. "Always do this."
-- **Skills** — Conditionally activated context. Loaded when relevant to the task at hand. Domain expertise, tool-specific guides, framework patterns. "Load this when you need it."
-- **Docs** — Project-scoped context. Compiled into a token-efficient index per project, looked up as needed. API conventions, architecture decisions, team patterns. "This is how *this project* works."
+When the spec and TODO disagree, the spec wins. If you discover a missing requirement mid-work, write it into the durable spec first (next available ID, append-only), then update the Phase's TODO line.
 
-All three are markdown. All three live in a single source. Reishi syncs them to every configured target. The user edits in one place and the tool handles the rest — symlinking or copying to Claude, OpenCode, the shared `~/.agents/` target, or whatever comes next.
+## Vocabulary
 
-The goal is to make it easy to figure out what works for you and freely move context between these three roles as your understanding evolves. A skill you use every session should probably be a rule. A rule that only applies to certain projects should probably be a doc fragment. Reishi makes these transitions trivial.
+Canonical six-word glossary — keep CLI output, errors, and docs consistent with this:
 
-## Core Concepts
+- **fragment** — any single markdown file reishi manages
+- **source** — `~/.config/reishi/` (default); always authoritative
+- **target** — agents (skills + rules) and projects (docs)
+- **sync** — local-only write, source → targets
+- **pull** — network operation, remote → source for tracked skills
+- **remote** — upstream of a tracked skill (a GitHub repo)
 
-### Source of truth
+## Source layout
 
-All managed content lives in a single source directory per construct:
-- Skills: `skills.source` (default `~/.config/reishi/skills/`)
-- Rules: `rules.source` (default `~/.config/reishi/rules/`)
-- Docs: `docs.source` (default `~/.config/reishi/docs/`)
+| File | Purpose |
+| --- | --- |
+| `reishi.ts` | Cliffy command tree and action wiring |
+| `config.ts` | TOML schema, `loadConfig`/`saveConfig`/`initConfig`, link/unlink |
+| `paths.ts` | Source-dir resolvers, cached per session |
+| `sync.ts` | Sync engine, pull, prefix-change, orphan walk, skill move/remove |
+| `rules.ts` | Rules CRUD + sync + `compileRules` |
+| `docs.ts` | Fragments + index compilation + project-level CRUD + `compileDocsToSource` |
+| `test-helpers.ts` | `setupIsolatedEnv`, `makeFixtureTarball`, `fakeFetchGithub` |
+| `assets/` | Skill scaffold templates (embedded via `deno compile --include`) |
+| `scripts/compile-all.sh` | Cross-compile to `{os}-{arch}` |
+| `.github/workflows/` | CI + release workflows |
 
-These are where users create, edit, and customize content. They are always authoritative — reishi never writes to source directories without explicit user action.
-
-### Agents and projects (targets)
-
-Targets — the places reishi writes to — come in two shapes:
-
-- **Agents** — Named targets for skills and rules. Each agent groups a `skills` path and a `rules` path (e.g. `[agents.claude]` with `skills = "~/.claude/skills"` and `rules = "~/.claude/rules"`). Use `--agents=<name>` on sync/pull to filter.
-- **Projects** — Named targets for docs. Each project maps a name to a project root on disk (e.g. `[projects.myproject]` with `path = "~/code/myproject"`). Use `--projects=<name>` on docs sync to filter.
-
-A built-in `shared` agent target points at `~/.agents/` and is opt-in via `include_shared_agent = true`. It cannot be redirected — the path is fixed by convention so any tool that reads `~/.agents/` finds the same content.
-
-Reishi syncs from source to these targets via copy or symlink. Target files are overwritten on every sync. Sources are input, targets are output.
-
-### Tracking (skills only)
-
-A tracked skill records its remote origin in a lockfile (`reishi-lock.toml`) so reishi can check for remote updates and pull fresh content. Tracking does not surrender ownership — the user's source copy is always authoritative. Tracking means "I want to know when the remote has updates," not "the remote owns this."
-
-### Sync vs pull
-
-Two distinct operations, deliberately separated:
-
-- **`rei sync`** — Local only, no network. Syncs source → targets for all three constructs. Fast, always safe.
-- **`rei skills pull`** — Network operation. Pulls fresh content from each tracked skill's remote. Compares the remote HEAD SHA against the lockfile's recorded SHA. If the remote moved, downloads new content with divergence protection.
-
-### Divergence protection
-
-When `rei skills pull` fetches new content from the remote, each file is handled independently:
-
-- **Unchanged locally** (file mtime <= `synced_at`): overwritten with the remote version.
-- **Modified locally** (file mtime > `synced_at`): user's version kept in place, the remote version saved as `<filename>_1.md` (incrementing `_2`, `_3` as needed).
-
-Pull is always safe — it never destroys user work.
-
-### Config vs lockfile
-
-- **`config.toml`** — User-edited configuration: source paths, sync method, agent/project destinations, prefix settings, update polling. Pure preferences, no state.
-- **`reishi-lock.toml`** — Machine-managed tracking state: per-skill remote URL, ref, subpath, prefix, SHA, `synced_at`. Written by `rei skills add -t` and `rei skills pull`.
-
-Both live in the reishi config directory (default `~/.config/reishi/`).
-
-## Quick Start
-
-```bash
-deno task cli <command> [args]    # Run against live source during development
-deno task check                   # Type check
-deno task test                    # Full test suite
-deno task install                 # Install globally as `rei`
-```
-
-## Command Structure
-
-Four top-level domains, each a subcommand group:
+## Command tree
 
 ```text
-rei skills  [new|validate|add|list|activate|deactivate|pull|sync]
-rei rules   [list|sync]
-rei docs    [list|add|remove|sync]
-rei config  [init|show|path]
-rei sync    ← top-level convenience: sync all three domains at once
+rei skills  [new|validate|add|list|activate|deactivate|move|remove|pull|sync]
+rei rules   [list|move|remove|compile|sync]
+rei docs    [list|add|move|remove|compile|sync]
+rei config  [init|show|path|link {agent,project}|unlink {agent,project}]
+rei sync    cross-domain convenience (skills + rules + docs)
 ```
 
-### rei skills
+Aliases: `mv` for `move`, `rm` for `remove`, `ls` for `list`, `on`/`off` for `activate`/`deactivate`, `a` for `skills add`, `check` for `validate`.
 
-Manage conditionally-activated agent context.
+`--check` mode (no writes, no network on sync side):
+- `rei skills sync --check` — per skill × agent freshness (`fresh|stale|diverged|missing|symlink`)
+- `rei skills pull --check` — remote SHA probe per tracked skill, no download
 
-```bash
-rei skills new <name> [--path dir]        # scaffold from template
-rei skills validate <path>                # check structure + frontmatter
-rei skills add <github-url> [-t] [-p]     # install from GitHub
-rei skills list [-a]                      # list active (or all) skills
-rei skills activate <name>                # re-enable a deactivated skill
-rei skills deactivate <name>              # temporarily disable
-rei skills pull [name] [--dry-run] [--check]  # pull from remotes / check for updates
-rei skills sync [name] [--agents] [--method] [--dry-run] [--check]  # sync to agent targets
-```
+Auto-sync triggers (call `syncSkill(name)` after their primary work): `skills add`, `skills new`, `skills activate`, `skills deactivate`, `skills pull`.
 
-#### new
-
-Scaffold a new skill:
-
-```text
-my-skill/
-├── SKILL.md              # Frontmatter + instructions
-├── example-reference.md  # Modular deeper documentation
-├── scripts/              # Executable code + workflows
-│   └── example.ts
-└── assets/               # Templates/files for workflows
-    └── example_asset.txt
-```
-
-**Name rules**: lowercase letters, digits, hyphens. No leading/trailing/consecutive hyphens. Max 64 chars.
-
-#### add
-
-Install skills from a GitHub tree URL:
-
-```bash
-rei skills add https://github.com/user/repo/tree/main/skills/my-skill   # single
-rei skills add https://github.com/user/repo/tree/main/skills             # all in dir
-```
-
-- `-t, --track`: record origin in lockfile for future `rei skills pull`
-- `-p, --prefix [value]`: prefix skill names (infer from GitHub org, or provide explicitly)
-
-#### pull
-
-Pull tracked skills from their remotes with divergence protection:
-
-1. Fetch HEAD SHA from GitHub API (lightweight, single call per skill).
-2. Compare against lockfile SHA — skip if unchanged.
-3. If the remote moved: download tarball, extract, merge with divergence protection.
-4. Update `sha` and `synced_at` in lockfile.
-5. Auto-sync to targets.
-
-**Prefix changes**: if `prefix` was edited in the lockfile, pull detects the mismatch and prompts for resolution (rename / parallel / abort). Use `--prefix-change=rename|parallel|abort` for non-interactive flows.
-
-#### --check (inspection mode)
-
-Both `sync` and `pull` accept `--check` to inspect state without writing:
-
-- **`rei skills sync --check`** — Report per skill × agent freshness: `fresh`, `stale`, `diverged`, `missing`, `symlink`. Local only, no network.
-- **`rei skills pull --check`** — Lightweight remote check — fetches HEAD SHA per tracked skill, reports which have updates. No downloads.
-
-### rei rules
-
-Always-on, user-level agent context. Rules are the simplest construct — a folder of markdown files at `rules.source` (default `~/.config/reishi/rules/`). No tracking, no frontmatter, no conditional activation. Drop a `.md` file in the folder, sync, and it's active for every session across every agent.
-
-Users manage the files directly — create, edit, delete with their editor or filesystem tools. Reishi just lists what's there and syncs it to every agent target.
-
-```bash
-rei rules list                                                      # list all rules in source
-rei rules sync [--agents=claude] [--method=symlink] [--dry-run]     # sync to agent targets
-```
-
-### rei docs
-
-Project-scoped agent context. Docs are markdown fragments organized by project, compiled into a token-efficient index that agents look up as needed.
-
-Each subdirectory of `docs.source` is a project. Each `.md` file inside is a fragment. Unlike rules and skills, docs are synced to real project directories — the compiled index lands at `<target>/<index_filename>` (default `AGENTS.md`), and fragments go under `<target>/<docs.default_target>/` (default `.agents/docs/`).
-
-Users manage fragment files directly in the project subdirectory. Reishi handles project creation (which involves both a directory and a config entry) and sync.
-
-```bash
-rei docs list [project]                                     # list projects, or fragments in a project
-rei docs add <project> [--target path]                      # create project dir + config entry
-rei docs remove <project>                                   # remove config entry (prompts to also delete docs dir)
-rei docs sync [project] [--target path] [--dry-run]         # compile index + sync fragments
-rei docs sync [project] --stdout                            # preview the compiled index without writing
-```
-
-`rei docs remove` is a two-step confirmation: first confirms removing the project's config entry, then optionally offers to delete the project's docs directory. Config removal is the default action; filesystem deletion is opt-in.
-
-**Index format**: one heading per fragment, a one-line description (frontmatter `description` > first non-heading paragraph > first heading), and a relative link to the fragment file. Ordered by frontmatter `priority` descending, then alphabetically. Truncated at `token_budget` with an omission notice.
-
-### rei config
-
-```bash
-rei config init     # create config file, lockfile, and directories
-rei config show     # print effective config
-rei config path     # print config file path
-```
-
-Override location with `REISHI_CONFIG=/path/to/config.toml`.
-
-### rei sync
-
-Top-level convenience — syncs all three domains (skills, rules, docs) to targets in one operation. Local only, no network.
-
-```bash
-rei sync                          # sync everything
-rei sync --agents=claude          # limit to specific agents
-rei sync --method=symlink         # override sync method
-rei sync --dry-run                # preview without writing
-```
-
-Individual domain syncs are also available via `rei skills sync`, `rei rules sync`, `rei docs sync`.
-
-**Sync method resolution** (highest wins): CLI `--method` > per-content-type override > global `sync_method`.
-
-**Auto-sync**: `skills add`, `skills activate`, `skills deactivate`, `skills new`, and `skills pull` trigger sync automatically after completing their work.
-
-## Config Schema
+## Config schema
 
 ```toml
 # ~/.config/reishi/config.toml
 
 sync_method = "copy"            # "copy" or "symlink"
-default_prefix = "infer"        # "infer" from GitHub org, or "none"
+default_prefix = "infer"        # or "none"
 prefix_separator = "_"
-include_shared_agent = true     # opt in to the built-in `shared` target at ~/.agents/
+include_shared_agent = true     # opt in to ~/.agents/ as the built-in `shared` agent
+clean_on_sync = false           # opt-in batched orphan prompt at end of `rei sync`
 
 [skills]
 source = "~/.config/reishi/skills"
 
-[updates]
-enabled = true
-interval_hours = 24
-
 [rules]
 source = "~/.config/reishi/rules"
-# sync_method = "symlink"      # inherits global if unset
-
-[agents.claude]
-skills = "~/.claude/skills"
-rules = "~/.claude/rules"
-
-# [agents.opencode]
-# skills = "~/.opencode/skills"
-# rules = "~/.opencode/rules"
+# sync_method = "symlink"       # inherits global if unset
 
 [docs]
 source = "~/.config/reishi/docs"
@@ -242,76 +82,108 @@ index_filename = "AGENTS.md"
 # sync_method = "symlink"
 # token_budget = 4000
 
+[updates]
+enabled = true
+interval_hours = 24
+
+[agents.claude]
+skills = "~/.claude/skills"
+rules = "~/.claude/rules"
+# compile = true                # ship a single concatenated rules artifact
+# compile_root = "~/.claude"    # default: dirname(rules)
+# compile_file = "AGENTS.md"    # path relative to compile_root; `..` rejected
+
 [projects.myproject]
 path = "~/code/myproject"
-# fragments = ["api-conventions.md", "testing.md"]
+# fragments = ["api-conventions.md", "testing.md"]   # subset filter
 
-# Per-skill config overrides (optional)
+# Per-skill overrides (optional)
 [skill_overrides.book-review]
 sync_method = "symlink"
-agents = ["claude"]
+agents = ["claude"]              # restrict to these named agents
+# updates = false                # disable polling for this skill
 ```
 
-## Lockfile Schema
+Sync method resolution (highest wins): CLI `--method` > per-skill `[skill_overrides.<name>].sync_method` > per-domain `[rules].sync_method` / `[docs].sync_method` > global `sync_method`.
+
+The `shared` agent name is reserved — set `include_shared_agent = true` instead of writing `[agents.shared]`. The path is fixed at `~/.agents/`.
+
+## Lockfile schema
 
 ```toml
-# ~/.config/reishi/reishi-lock.toml — managed by rei, do not edit manually
+# ~/.config/reishi/reishi-lock.toml — managed by `rei skills add -t` and `rei skills pull`
 
 [skills.readwiseio_book-review]
-source_url = "https://github.com/readwiseio/readwise-skills"  # remote
+source_url = "https://github.com/readwiseio/readwise-skills"
 subpath = "skills/book-review"
 ref = "main"
-sha = "abc123def456..."
+sha = "abc123..."
 synced_at = "2026-04-23T12:00:00Z"
 prefix = "readwiseio"
 ```
 
+`REISHI_CONFIG` and `REISHI_LOCKFILE` override the default paths with parallel semantics.
+
+## Two-step compile (rules + docs)
+
+Compile generates a source-side artifact that sync ships as-is — git-trackable and visible to the user.
+
+- `rei rules compile` writes `<rules.source>/AGENTS.md` (constant `COMPILED_RULES_FILENAME`). Agents with `compile = true` receive a copy of this file at `<compile_root>/<compile_file>`. `compile_file` paths that escape `compile_root` via `..` are rejected.
+- `rei docs compile [project]` writes `<docs.source>/<project>/<index_filename>`. `compileToTarget` writes to source first, then ships to the project root.
+- `rei sync` runs the relevant compile step automatically before shipping.
+
+## Divergence protection
+
+`rei skills pull` merges file-by-file:
+- mtime ≤ `synced_at`: overwritten with the remote version
+- mtime > `synced_at`: local version preserved; remote saved as `<stem>_<N><ext>` (`SKILL.md` → `SKILL_1.md`, then `_2`, `_3`, …) up to 1000
+
+`_N`-suffixed files are user-facing artifacts — never reconsidered for further suffixing or removal. Pull never destroys user work. There is no `--force`.
+
+## Concurrency
+
+Independent operations fan out via `Promise.all`:
+- `syncAll` per-skill, `syncSkill` per-target, `unsyncSkill` per-target
+- `syncDocs` per-project, `compileToTarget` per-fragment write
+- `compileRules` fragment reads
+- `findOrphans` per-agent
+- `checkForUpdates` per-skill HEAD probe
+- top-level `rei sync` runs skills/rules/docs in parallel
+
+Pull operations stay sequential because `printPullSummary` and mid-flow `Downloading...` lines would interleave.
+
 ## Testing
 
 ```bash
-deno task test              # full suite (unit + integration + CLI + compiled binary)
-deno task test:unit         # fast: config, paths
-deno task test:cli          # CLI plumbing: help, init, validate, completions, config
-deno task test:sync         # sync engine: copy, symlink, targets, status
-deno task test:sync-fetch   # upstream fetch, local mod detection
-deno task test:sync-prefix  # prefix change flows
-deno task test:add          # add command integration
-deno task test:updates      # update polling
-deno task test:rules        # rules CRUD + sync
-deno task test:docs         # docs fragments, index compilation, sync
-deno task test:compile      # compiled binary smoke tests
+deno task test                     # full suite via scripts/test.ts
+deno task test:unit                # config, paths
+deno task test:cli                 # end-to-end CLI smoke
+deno task test:sync                # sync engine
+deno task test:sync-fetch          # upstream fetch + divergence
+deno task test:sync-prefix         # prefix-change flows
+deno task test:add                 # add command integration
+deno task test:updates             # update polling
+deno task test:rules               # rules list/sync
+deno task test:docs                # docs fragments + index compilation
+deno task test:move-remove         # Phase 13 source-side CRUD
+deno task test:phase14             # rules+docs compile, agent compile opt-in
+deno task test:clean-on-sync       # orphan walk + cleanup
+deno task test:shared-agent        # include_shared_agent semantics
+deno task test:compile             # compiled-binary smoke (needs network for denort)
 ```
 
-All tests use `REISHI_CONFIG`-redirected temp dirs and offline fixture helpers (`test-helpers.ts`, `test-fixtures/`). Interactive prompts use injectable callbacks to avoid terminal dependency. Nothing hits live GitHub.
+Every suite runs offline against `REISHI_CONFIG`-redirected temp dirs. `HttpFetcher`, `PromptYesNo`, and `PromptChoice` are injectable so prompts and network calls stay hermetic.
 
-## Source Layout
+## Dev workflow
 
-| File | Purpose |
-| --- | --- |
-| `reishi.ts` | Cliffy command definitions and action wiring |
-| `config.ts` | TOML schema, `loadConfig` / `saveConfig` / `initConfig`, deep-merge with defaults |
-| `paths.ts` | Resolves `skills.source`, `rules.source`, `docs.source`, cached per session |
-| `sync.ts` | Target sync engine, upstream fetch, prefix-change flow, `checkForUpdates` |
-| `rules.ts` | Rules CRUD + sync |
-| `docs.ts` | Fragment CRUD, index compilation with token budget, per-project distribution |
-| `test-helpers.ts` | `setupIsolatedEnv`, `makeFixtureTarball`, `fakeFetchGithub` |
-| `assets/` | Skill templates (embedded in compiled binary via `--include`) |
-| `scripts/compile-all.sh` | Cross-compile to `{os}-{arch}` targets |
-| `.github/workflows/` | CI + release workflows |
+```bash
+deno task cli <command>            # run from source
+deno task check                    # type check
+deno task test                     # all suites
+deno task compile                  # bin/rei
+deno task install                  # install global rei
+```
 
-## Development Tips
+## Stack
 
-1. Edit the relevant module (`reishi.ts` for CLI, `config.ts`/`sync.ts`/`rules.ts`/`docs.ts` for logic)
-2. Type check: `deno task check`
-3. Test: `deno task test` (or specific `test:*` tasks for fast feedback)
-4. Try it: `deno task cli <command>`
-5. Compile: `deno task compile` (builds `bin/rei`)
-6. Deploy: `deno task install` (updates global `rei` at `~/.local/bin/rei`)
-
-## Architecture
-
-- **Deno** — TypeScript native, secure by default, cross-compile to static binaries
-- **Cliffy** — declarative CLI framework with tab completion
-- **`@std/toml`** (config), **`@std/yaml`** (skill frontmatter), **`@std/fs`**, **`@std/path`**, **`@std/fmt/colors`**
-- **Offline-first tests** — fetch injection (`HttpFetcher`) keeps the full suite hermetic
-- Single portable binary per platform, distributable via Homebrew and Linux package managers
+Deno + TypeScript. Cliffy (CLI), `@std/toml` + `@std/yaml` (parsing), `@std/fs` + `@std/path`, `@std/fmt/colors`. Single portable binary per platform via `deno compile`, distributed through Homebrew + Linux package managers.
