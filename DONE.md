@@ -1,5 +1,72 @@
 # Completed Work Log
 
+## Phase 15: `clean_on_sync` orphan cleanup ✅
+**Requirements**: sy-R070, sy-R071, sy-R072, sy-R073, sy-R074
+
+Opt-in orphan cleanup for skills and rules targets. New `clean_on_sync_test.ts` suite (7 tests) covers both kinds, symlink-skipping, compile-artifact exclusion, agent filtering, and `cleanOrphans` deletion semantics.
+
+- [x] `clean_on_sync` boolean added to `ConfigSchema` (default false). Lives top-level alongside `sync_method`.
+- [x] `findOrphans(filterAgents?)` walks every configured agent's `skills` and `rules` paths and reports entries that exist in the target but not in source. Symlinks are skipped — they self-resolve when source moves or is deleted, so they're never orphans. Deactivated skills count as orphans (the active source set is the contract).
+- [x] The compile artifact (`<compile_root>/<compile_file>`) is excluded from the rules orphan walk so opt-in agents don't see it flagged.
+- [x] `rei sync` calls a new `runOrphanCleanup` after the per-domain syncs when `clean_on_sync = true`. Single batched Y/N prompt: `clean up 🧼: remove A, B, and C? (Y/n)`. `--dry-run` skips the prompt and prints `would remove ...` instead. Default `Y` so the common case is one keystroke.
+- [x] `cleanOrphans` is best-effort: failures are returned as `{ ok: false, reason }` rows rather than thrown, so one stuck path doesn't abort the rest.
+
+Scope notes:
+
+- Docs orphan cleanup was intentionally left out — `compileToTarget` already wipes the fragments dir before each write, so docs never accumulate orphans the way skills and rules can.
+- Source-side `move`/`remove` (Phase 13) deliberately leave target dirs in place; `clean_on_sync = true` is the supported propagation path on the next sync.
+
+## Phase 14: Two-step compile (rules + docs) ✅
+**Requirements**: ru-R040, ru-R041, dc-R080, dc-R081, sy-R060, sy-R061, sy-R062, sy-R063, sy-R064
+
+Compile now writes a source-side artifact that sync ships as-is — git-trackable, user-visible, and decoupled from the network-free sync engine. New `compile_phase14_test.ts` suite (12 tests) covers source artifact format, path-traversal rejection, source-then-ship semantics, and the compile-opt-in flow.
+
+### Per-agent compile config
+
+- [x] `[agents.<name>].compile`, `compile_root`, `compile_file` keys added to `AgentConfig`. Defaults: `compile = false`; when true, `compile_root` defaults to `dirname(rules)` and `compile_file` defaults to `AGENTS.md`. `compile_file` is resolved relative to `compile_root` and rejected (with a clear error) if it escapes the root via `..` or absolute paths outside it.
+
+### Compile commands
+
+- [x] `rei rules compile` — concatenates every rule fragment under `<rules.source>` into `<rules.source>/AGENTS.md` (constant `COMPILED_RULES_FILENAME`). The artifact itself is excluded from the input set so re-running is idempotent. Format: `# Agent rules` header, one `## <name>` section per fragment with body inlined; directories of `.md` files are flattened to `## <dir>/<file>` sections.
+- [x] `rei docs compile [project]` — writes `<docs.source>/<project>/<index_filename>` from the existing `compileIndex` output. With no project arg, compiles every project under `<docs.source>`.
+
+### Sync integration
+
+- [x] `syncRules` now runs `compileRules()` automatically when any participating agent has `compile = true`, then ships the source artifact (copy or symlink, per resolved method) to each opt-in agent's `<compile_root>/<compile_file>`. Failures (path traversal, missing parent) are returned as `(compile)` rows in the sync result instead of aborting the whole run.
+- [x] `compileToTarget` (docs sync path) refactored to write the index to source first, then copy or symlink that source artifact to `<target>/<index_filename>`. Behavior change is invisible to existing tests — the target still ends up with the same content — but the source is now the durable home of the artifact.
+
+## Phase 13: Source-side CRUD — `move` and `remove` ✅
+**Requirements**: sk-R090, sk-R091, sk-R093, ru-R030, ru-R031, ru-R032, ru-R033, dc-R070, dc-R071, dc-R072, dc-R073
+
+Filled the CRUD gap on source fragments across all three domains. Source-only — target cleanup deferred to Phase 15 (`clean_on_sync`). New `stripMdSuffix` helper exported from both `rules.ts` and `docs.ts` so callers may pass `foo` or `foo.md`. New `move_remove_test.ts` suite (18 tests) covers happy paths, suffix flexibility, refusal to clobber, and lockfile/skill_overrides side-effects.
+
+### `move` / `mv`
+
+- [x] `rei rules move <old> <new>` — flat namespace: rename `<rules.source>/<old>.md` → `<new>.md`
+- [x] `rei docs move <project> <old> <new>` — rename `<docs.source>/<project>/<old>.md` → `<new>.md`; rewrites `[projects.<name>].fragments` in place when the array references the old basename
+- [x] `rei skills move <old> <new>` — rename source dir, rekey lockfile entry, rekey `[skill_overrides.<name>]` if present
+  - Source-only: deactivated dirs and target dirs are intentionally left alone — Phase 15's `clean_on_sync` propagates the rename to copy targets on next sync; symlinks self-resolve
+
+### `remove` / `rm`
+
+- [x] `rei rules remove <name>` — delete `<rules.source>/<name>.md`
+- [x] `rei docs remove <project> <fragment>` — fragment-level delete; prunes any matching entry from `[projects.<name>].fragments`
+- [x] `rei skills remove <name>` — delete source dir, drop lockfile entry, drop `[skill_overrides.<name>]`
+
+## Phase 12: `config link` parity with `unlink` ✅
+
+Moved agent and project adds under `config link`, mirroring the existing `config unlink` namespace. New `linkAgent` lives next to `unlinkAgent` in `config.ts`; `linkProject` reuses `addDocProject` (path normalization stays in `docs.ts`). `rei docs add` is kept as a deprecated alias that still writes the `[projects.*]` entry but prints a pointer to `rei config link project` on stderr.
+
+### `config link` subcommand
+
+- [x] `rei config link agent <name> --skills <path> --rules <path>` — write `[agents.<name>]` with the two path keys
+  - Rejects the reserved `shared` name (use `include_shared_agent`)
+  - Refuses to overwrite an existing entry without `--force`
+- [x] `rei config link project <name> --target <path>` — normalize the path the same way `docs add` does, write `[projects.<name>]`
+  - Wraps `addDocProject` so source-dir creation + `~/`-condensing carry over unchanged
+- [x] Update or alias the existing `rei docs add` to point at the new home; deprecation message if aliasing
+  - Aliased: still functional, but help text and runtime stderr now point at `rei config link project`
+
 ## Phase 11: Open Source Documentation ✅
 
 Three parallel deliverables — README, SECURITY, CONTRIBUTING + LICENSE — written for the public-facing OSS launch. All use Phase 9 canonical vocabulary.

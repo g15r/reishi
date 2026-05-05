@@ -25,6 +25,7 @@ import {
   getConfigPath,
   getLockfilePath,
   initConfig,
+  linkAgent,
   loadConfig,
   loadLockfile,
   saveConfig,
@@ -36,12 +37,17 @@ import {
 import { getDeactivatedDir, getSourceDir } from './paths.ts';
 import {
   checkForUpdates,
+  cleanOrphans,
+  findOrphans,
+  moveSkill,
+  type Orphan,
   printStatus,
   printSummary,
   pullAll,
   pullSkill,
   type PullOptions,
   type PullSkillResult,
+  removeSkill,
   summarizeDiff,
   syncAll,
   syncSkill,
@@ -50,17 +56,24 @@ import {
   unsyncSkill,
 } from './sync.ts';
 import {
+  compileRules,
   getRuleNames,
   listRules,
+  moveRule,
   printRulesSummary,
+  removeRule,
   syncRules,
 } from './rules.ts';
 import {
   addDocProject,
+  compileDocsToSource,
   formatCompileSummary,
   getDocProjectNames,
+  getFragmentNames,
   listDocProjects,
   listFragments,
+  moveFragment,
+  removeFragment,
   unlinkProject,
   syncDocs,
 } from './docs.ts';
@@ -976,6 +989,44 @@ function configPath(): boolean {
 }
 
 /**
+ * Phase 15: collect every orphan target across the run, render a single
+ * batched prompt, and delete the user-confirmed set. Under `--dry-run`, no
+ * prompt is shown and the would-be cleanup is reported instead.
+ */
+async function runOrphanCleanup(options: {
+  agents?: string[];
+  dryRun?: boolean;
+}): Promise<void> {
+  const orphans: Orphan[] = await findOrphans(options.agents);
+  if (orphans.length === 0) return;
+
+  const fmt = (o: Orphan) => `${o.kind}/${o.name} → ${o.agent}`;
+  if (options.dryRun) {
+    console.log(`${dim(italic('clean up 🧼: would remove'))} ${orphans.length} orphan${
+      orphans.length === 1 ? '' : 's'
+    }`);
+    for (const o of orphans) console.log(`  ${dim(italic(fmt(o)))}`);
+    return;
+  }
+
+  const list = orphans.map(fmt).join(', ');
+  const ok = await promptYesNoCli(`clean up 🧼: remove ${list}? (Y/n)`, false);
+  if (!ok) {
+    console.log(`${yellow('Skipped orphan cleanup.')}`);
+    return;
+  }
+  const results = await cleanOrphans(orphans);
+  const removed = results.filter((r) => r.ok).length;
+  const failed = results.filter((r) => !r.ok);
+  console.log(`${green('🧼 Removed')} ${removed} orphan${removed === 1 ? '' : 's'}`);
+  for (const f of failed) {
+    console.error(
+      `  ${red('❌ failed')} ${magenta(fmt(f.orphan))} ${dim(italic(`(${f.reason ?? ''})`))}`,
+    );
+  }
+}
+
+/**
  * Minimal yes/no terminal prompt. Returns false when stdin isn't a terminal
  * (non-interactive contexts get the safe default).
  */
@@ -1112,6 +1163,50 @@ const skillsCommand = new Command()
   .action(async (_options, skillName) => {
     const success = await deactivateSkill(skillName);
     Deno.exit(success ? 0 : 1);
+  })
+  .command('move <old-name:string:active-skill> <new-name:string>')
+  .alias('mv')
+  .description('Rename a skill in source (target cleanup happens on next sync)')
+  .example('Rename a skill', 'rei skills move old-name new-name')
+  .action(async (_options, oldName, newName) => {
+    try {
+      const result = await moveSkill(oldName, newName);
+      console.log(`${green('🪪 Renamed')} ${magenta(oldName)} → ${magenta(newName)}`);
+      console.log(`   ${dim(italic('source:'))} ${result.toPath}`);
+      if (result.rekeyedLockfile) {
+        console.log(`   ${dim(italic('lockfile entry rekeyed'))}`);
+      }
+      if (result.rekeyedSkillOverrides) {
+        console.log(`   ${dim(italic('[skill_overrides] entry rekeyed'))}`);
+      }
+      Deno.exit(0);
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      console.error(`${red('❌ Error:')} ${message}`);
+      Deno.exit(1);
+    }
+  })
+  .command('remove <skill-name:string:active-skill>')
+  .alias('rm')
+  .description('Delete a skill from source (target cleanup happens on next sync)')
+  .example('Remove a skill', 'rei skills remove old-skill')
+  .action(async (_options, skillName) => {
+    try {
+      const result = await removeSkill(skillName);
+      console.log(`${green('🗑  Removed')} ${magenta(skillName)}`);
+      console.log(`   ${dim(italic('deleted:'))} ${result.removedPath}`);
+      if (result.removedFromLockfile) {
+        console.log(`   ${dim(italic('lockfile entry dropped'))}`);
+      }
+      if (result.removedFromSkillOverrides) {
+        console.log(`   ${dim(italic('[skill_overrides] entry dropped'))}`);
+      }
+      Deno.exit(0);
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      console.error(`${red('❌ Error:')} ${message}`);
+      Deno.exit(1);
+    }
   })
   .command('sync [skill-name:string:active-skill]')
   .description('Distribute skills from source to configured targets (local only)')
@@ -1257,6 +1352,83 @@ function printPullSummary(results: PullSkillResult[]): void {
   }
 }
 
+// Config link — write an agent or project entry into config. Mirror image of
+// `config unlink`. Project link also creates the docs source dir and
+// normalizes the target path the same way `docs add` does.
+const linkAgentCmd = new Command()
+  .description('Write an [agents.<name>] entry to config')
+  .arguments('<name:string>')
+  .option('--skills <path:string>', 'Path to the agent\'s skills target', { required: true })
+  .option('--rules <path:string>', 'Path to the agent\'s rules target', { required: true })
+  .option('--force', 'Overwrite an existing [agents.<name>] entry')
+  .example(
+    'Link the claude agent',
+    'rei config link agent claude --skills ~/.claude/skills --rules ~/.claude/rules',
+  )
+  .action(async (options, name) => {
+    try {
+      const result = await linkAgent(name, {
+        skills: options.skills,
+        rules: options.rules,
+        force: options.force,
+      });
+      if (result.overwrote) {
+        console.log(
+          `${green('✅ Updated agent')} ${magenta(name)} ${
+            dim(italic('(overwrote existing entry)'))
+          }`,
+        );
+      } else {
+        console.log(`${green('✅ Linked agent')} ${magenta(name)}`);
+      }
+      Deno.exit(0);
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      console.error(`${red('❌ Error:')} ${message}`);
+      Deno.exit(1);
+    }
+  });
+
+const linkProjectCmd = new Command()
+  .description('Write a [projects.<name>] entry and create the docs source dir')
+  .arguments('<name:string>')
+  .option('--target <path:string>', 'Project root on disk for sync')
+  .option('--force', 'Re-use an existing source dir instead of erroring')
+  .example('Link a project', 'rei config link project myproject --target ~/code/myproject')
+  .action(async (options, name) => {
+    try {
+      const result = await addDocProject(name, {
+        target: options.target,
+        force: options.force,
+      });
+      console.log(
+        `${green('✅ Linked project')} ${magenta(name)} ${
+          dim(italic(`(source: ${result.sourceDir})`))
+        }`,
+      );
+      if (!options.target) {
+        console.log(
+          `   ${dim(italic('Tip: set'))} [projects.${name}].path ${
+            dim(italic('in config.toml to enable sync'))
+          }`,
+        );
+      }
+      Deno.exit(0);
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      console.error(`${red('❌ Error:')} ${message}`);
+      Deno.exit(1);
+    }
+  });
+
+const linkCommand = new Command()
+  .description('Add an agent or project entry to config')
+  .action(function () {
+    this.showHelp();
+  })
+  .command('agent', linkAgentCmd)
+  .command('project', linkProjectCmd);
+
 // Config unlink — drop an agent or project entry from config. Project unlink
 // also offers to clean up the source dir; agent unlink is config-only (the
 // 'shared' agent flips include_shared_agent off instead of mutating agents.*).
@@ -1387,7 +1559,7 @@ const unlinkCommand = new Command()
   .command('agent', unlinkAgentCmd)
   .command('project', unlinkProjectCmd);
 
-// Config command (with subcommands: init, show, path, unlink)
+// Config command (with subcommands: init, show, path, link, unlink)
 const configCommand = new Command()
   .description('Inspect and manage reishi config')
   .action(function () {
@@ -1422,6 +1594,7 @@ const configCommand = new Command()
     const success = configPath();
     Deno.exit(success ? 0 : 1);
   })
+  .command('link', linkCommand)
   .command('unlink', unlinkCommand);
 
 cli.command('config', configCommand);
@@ -1445,17 +1618,17 @@ cli
     const agents = syncOnly.agents;
     const method = syncOnly.method;
 
-    const skillResults = await syncAll(syncOnly);
-    const ruleResults = await syncRules({
-      agents,
-      method,
-      dryRun: options.dryRun,
-    });
     const config = await loadConfig();
     const docsProjects = config.projects ?? {};
-    const docsRuns = Object.keys(docsProjects).length > 0
-      ? await syncDocs({ method, dryRun: options.dryRun })
-      : [];
+    // Three independent domains — sync them in parallel. Output is aggregated
+    // at the end, so interleaved completion order doesn't matter.
+    const [skillResults, ruleResults, docsRuns] = await Promise.all([
+      syncAll(syncOnly),
+      syncRules({ agents, method, dryRun: options.dryRun }),
+      Object.keys(docsProjects).length > 0
+        ? syncDocs({ method, dryRun: options.dryRun })
+        : Promise.resolve([]),
+    ]);
 
     const anyFail = skillResults.some((r) => r.action === 'failed') ||
       ruleResults.some((r) => r.action === 'failed') ||
@@ -1510,6 +1683,11 @@ cli
       }
     }
 
+    // Phase 15: orphan cleanup. Single batched prompt at the end of the run.
+    if (config.clean_on_sync === true) {
+      await runOrphanCleanup({ agents, dryRun: options.dryRun });
+    }
+
     Deno.exit(anyFail ? 1 : 0);
   });
 
@@ -1537,6 +1715,59 @@ const rulesCommand = new Command()
     }
     console.log(`\n${rules.length} rule${rules.length === 1 ? '' : 's'}`);
     Deno.exit(0);
+  })
+  .command('compile')
+  .description('Concatenate all rules into a source artifact (default <rules.source>/AGENTS.md)')
+  .option('--out <path:string>', 'Override the output path')
+  .example('Compile to default location', 'rei rules compile')
+  .action(async (options) => {
+    try {
+      const result = await compileRules({ outputPath: options.out });
+      console.log(
+        `${green('✨ Compiled')} ${result.fragmentCount} rule${
+          result.fragmentCount === 1 ? '' : 's'
+        } → ${magenta(result.outputPath)}`,
+      );
+      Deno.exit(0);
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      console.error(`${red('❌ Error:')} ${message}`);
+      Deno.exit(1);
+    }
+  })
+  .command('move <old-name:string:rule-name> <new-name:string>')
+  .alias('mv')
+  .description('Rename a rule fragment in source (`.md` suffix optional)')
+  .example('Rename a rule', 'rei rules move old-rule new-rule')
+  .action(async (_options, oldName, newName) => {
+    try {
+      const result = await moveRule(oldName, newName);
+      console.log(
+        `${green('🪪 Renamed')} ${magenta(oldName)} → ${magenta(newName)} ${
+          dim(italic(`(${result.toPath})`))
+        }`,
+      );
+      Deno.exit(0);
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      console.error(`${red('❌ Error:')} ${message}`);
+      Deno.exit(1);
+    }
+  })
+  .command('remove <name:string:rule-name>')
+  .alias('rm')
+  .description('Delete a rule fragment from source (`.md` suffix optional)')
+  .example('Remove a rule', 'rei rules remove no-deletes')
+  .action(async (_options, name) => {
+    try {
+      const result = await removeRule(name);
+      console.log(`${green('🗑  Removed')} ${magenta(name)} ${dim(italic(`(${result.removedPath})`))}`);
+      Deno.exit(0);
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      console.error(`${red('❌ Error:')} ${message}`);
+      Deno.exit(1);
+    }
   })
   .command('sync')
   .description('Sync rules from source to configured agent targets')
@@ -1602,18 +1833,25 @@ const docsCommand = new Command()
     Deno.exit(0);
   })
   .command('add <project:string>')
-  .description('Create a doc project: makes the source dir and config entry')
+  .description('[deprecated] Alias for `rei config link project`')
   .option('--target <path:string>', 'Project root on disk for sync')
   .option('--force', 'Re-use an existing source dir instead of erroring')
-  .example('Create a project', 'rei docs add myproject --target ~/code/myproject')
+  .example('Create a project', 'rei config link project myproject --target ~/code/myproject')
   .action(async (options, project) => {
+    console.error(
+      `${yellow('⚠ Deprecated:')} ${
+        dim(italic('use'))
+      } rei config link project ${magenta(project)} ${
+        dim(italic('— `rei docs add` will be removed in a future release'))
+      }`,
+    );
     try {
       const result = await addDocProject(project, {
         target: options.target,
         force: options.force,
       });
       console.log(
-        `${green('✅ Created docs project')} ${magenta(project)} ${
+        `${green('✅ Linked project')} ${magenta(project)} ${
           dim(italic(`(source: ${result.sourceDir})`))
         }`,
       );
@@ -1623,6 +1861,74 @@ const docsCommand = new Command()
             dim(italic('in config.toml to enable sync'))
           }`,
         );
+      }
+      Deno.exit(0);
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      console.error(`${red('❌ Error:')} ${message}`);
+      Deno.exit(1);
+    }
+  })
+  .command('compile [project:string:doc-project]')
+  .description('Compile per-project index into source (<docs.source>/<project>/<index_filename>)')
+  .example('Compile one project', 'rei docs compile myproject')
+  .example('Compile every project', 'rei docs compile')
+  .action(async (_options, project) => {
+    try {
+      const projects = project ? [project] : await listDocProjects();
+      if (projects.length === 0) {
+        console.log(`${yellow('⚠ No doc projects to compile')}`);
+        Deno.exit(0);
+      }
+      for (const p of projects) {
+        const result = await compileDocsToSource(p);
+        console.log(
+          `${green('✨ Compiled')} ${magenta(p)} → ${magenta(result.outputPath)}`,
+        );
+      }
+      Deno.exit(0);
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      console.error(`${red('❌ Error:')} ${message}`);
+      Deno.exit(1);
+    }
+  })
+  .command('move <project:string:doc-project> <old-name:string> <new-name:string>')
+  .alias('mv')
+  .description('Rename a fragment in a project (`.md` suffix optional)')
+  .example('Rename a fragment', 'rei docs move myproject api-old api-new')
+  .action(async (_options, project, oldName, newName) => {
+    try {
+      const result = await moveFragment(project, oldName, newName);
+      console.log(
+        `${green('🪪 Renamed')} ${magenta(`${project}/${oldName}`)} → ${
+          magenta(`${project}/${newName}`)
+        } ${dim(italic(`(${result.toPath})`))}`,
+      );
+      if (result.rewroteFragmentsArray) {
+        console.log(`   ${dim(italic('[projects.*].fragments updated'))}`);
+      }
+      Deno.exit(0);
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      console.error(`${red('❌ Error:')} ${message}`);
+      Deno.exit(1);
+    }
+  })
+  .command('remove <project:string:doc-project> <fragment:string>')
+  .alias('rm')
+  .description('Delete a fragment from a project (`.md` suffix optional)')
+  .example('Remove a fragment', 'rei docs remove myproject stale-fragment')
+  .action(async (_options, project, fragment) => {
+    try {
+      const result = await removeFragment(project, fragment);
+      console.log(
+        `${green('🗑  Removed')} ${magenta(`${project}/${fragment}`)} ${
+          dim(italic(`(${result.removedPath})`))
+        }`,
+      );
+      if (result.rewroteFragmentsArray) {
+        console.log(`   ${dim(italic('[projects.*].fragments updated'))}`);
       }
       Deno.exit(0);
     } catch (error) {

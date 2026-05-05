@@ -17,33 +17,6 @@ import { exists } from '@std/fs';
 export type SyncMethod = 'copy' | 'symlink';
 export type DefaultPrefix = 'infer' | 'none';
 
-// --- Sync target base types ------------------------------------------------
-
-/** Base shape for all sync destinations. */
-export interface SyncTarget {
-  name: string;
-  path: string;
-}
-
-/** Agent destinations group skills + rules paths under one name. */
-export interface AgentTarget extends SyncTarget {
-  skills: string;
-  rules: string;
-}
-
-/** Project destinations point at a project root for docs distribution. */
-export interface ProjectTarget extends SyncTarget {
-  fragments?: string[];
-  token_budget?: number;
-}
-
-/** Base sync options shared across all three domains. */
-export interface BaseSyncOptions {
-  method?: SyncMethod;
-  dryRun?: boolean;
-  check?: boolean;
-}
-
 // --- Config sections -------------------------------------------------------
 
 export interface SkillsConfig {
@@ -66,6 +39,25 @@ export interface RulesConfig {
 export interface AgentConfig {
   skills: string;
   rules: string;
+  /**
+   * Opt in to the compiled-rules artifact: when true, sync ships the rules
+   * concatenation written by `rei rules compile` to `<compile_root>/<compile_file>`.
+   * Default false. Individual rule files continue to ship independently.
+   */
+  compile?: boolean;
+  /**
+   * Filesystem root for `compile_file`, relative to which subpaths are resolved.
+   * Required when `compile = true`. Typically the agent's parent dir
+   * (e.g. `~/.claude` for an agent whose rules path is `~/.claude/rules`).
+   */
+  compile_root?: string;
+  /**
+   * Destination filename for the compiled rules artifact, relative to
+   * `compile_root`. Subpaths like `"sub/foo.md"` are allowed; paths that
+   * escape `compile_root` (via `..`) are rejected at sync time. Default
+   * `"AGENTS.md"`.
+   */
+  compile_file?: string;
 }
 
 export interface DocsProjectEntry {
@@ -117,6 +109,13 @@ export interface ConfigSchema {
    * it to true so new users get cross-agent context out of the box.
    */
   include_shared_agent?: boolean;
+  /**
+   * Opt-in cleanup of orphan files in copy targets — files present in the
+   * target but not in source. Symlinks self-resolve, so this only matters
+   * for `copy` syncs. Default false. The CLI batches every orphan across the
+   * whole sync run into a single Y/N prompt at the end.
+   */
+  clean_on_sync?: boolean;
 }
 
 /** Reserved name for the built-in shared-agent target. */
@@ -300,6 +299,52 @@ export async function saveConfig(config: ConfigSchema): Promise<void> {
   await Deno.mkdir(dirname(path), { recursive: true });
   // `@std/toml` strips undefined values; serialize as-is.
   await Deno.writeTextFile(path, stringifyTOML(config as unknown as Record<string, unknown>));
+}
+
+// ============================================================================
+// Link (write config entries)
+// ============================================================================
+
+export interface LinkAgentOptions {
+  skills: string;
+  rules: string;
+  /** Overwrite an existing `[agents.<name>]` entry instead of erroring. */
+  force?: boolean;
+}
+
+export interface LinkAgentResult {
+  /** True when the entry was newly written (or overwritten with --force). */
+  written: boolean;
+  /** True when an entry already existed and was overwritten. */
+  overwrote: boolean;
+}
+
+/**
+ * Write `[agents.<name>]` with `skills` and `rules` paths. Rejects the
+ * reserved `shared` name (use `include_shared_agent` instead). Refuses to
+ * clobber an existing entry without `force`.
+ */
+export async function linkAgent(
+  name: string,
+  options: LinkAgentOptions,
+): Promise<LinkAgentResult> {
+  if (name === SHARED_AGENT_NAME) {
+    throw new Error(
+      `'${SHARED_AGENT_NAME}' is reserved — set include_shared_agent = true to enable it`,
+    );
+  }
+  const config = await loadConfig();
+  const agents = { ...(config.agents ?? {}) };
+  const existed = name in agents;
+  if (existed && !options.force) {
+    throw new Error(
+      `agent already linked: ${name} (use --force to overwrite)`,
+    );
+  }
+  agents[name] = { skills: options.skills, rules: options.rules };
+  config.agents = agents;
+  await saveConfig(config);
+  return { written: true, overwrote: existed };
 }
 
 // ============================================================================

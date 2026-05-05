@@ -31,7 +31,7 @@ import {
   type SyncMethod,
 } from './config.ts';
 import { getDocsSourceDir } from './paths.ts';
-import { resolveMethod } from './sync.ts';
+import { resolveMethod, type SyncAction } from './sync.ts';
 
 // ============================================================================
 // Types
@@ -43,17 +43,8 @@ export interface FragmentEntry {
   size: number;
 }
 
-export type DocsSyncAction = 'copied' | 'symlinked' | 'skipped' | 'failed';
-
-export interface DocsSyncResult {
-  project: string;
-  target: string;
-  targetRoot: string;
-  /** Number of fragments distributed to the target. */
-  fragmentsWritten: number;
-  action: DocsSyncAction;
-  reason?: string;
-}
+/** Re-exported alias for docs-domain consumers. Same shape as `SyncAction`. */
+export type DocsSyncAction = SyncAction;
 
 export interface CompileOptions {
   /** When true, return the index text without writing/distributing anything. */
@@ -240,9 +231,117 @@ export async function getFragmentNames(project: string): Promise<string[]> {
   return fragments.map((f) => f.name);
 }
 
-// Fragment-level add/remove retired in Phase 7: users manage fragment files
-// directly. `rei docs add/remove` now operates at the project level — see
-// addDocProject / unlinkProject above.
+// ============================================================================
+// Fragment-level move and remove
+// ============================================================================
+
+/** Strip an optional trailing `.md` so callers may pass `foo` or `foo.md`. */
+export function stripMdSuffix(name: string): string {
+  return name.endsWith('.md') ? name.slice(0, -3) : name;
+}
+
+function validateFragmentBasename(name: string): string | null {
+  if (!name || name.length === 0) return 'fragment name cannot be empty';
+  if (name.includes('/') || name.includes('\\')) {
+    return 'fragment name cannot contain path separators';
+  }
+  if (name.startsWith('.')) return 'fragment name cannot start with a dot';
+  return null;
+}
+
+export interface MoveFragmentResult {
+  fromPath: string;
+  toPath: string;
+  /** True when the project's [projects.<name>].fragments array was rewritten. */
+  rewroteFragmentsArray: boolean;
+}
+
+/**
+ * Rename a fragment under `<docs.source>/<project>/`. Source-only — target
+ * cleanup happens on next sync. If the project's
+ * `[projects.<name>].fragments` array references the old basename, the entry
+ * is rewritten in-place (preserving order).
+ */
+export async function moveFragment(
+  project: string,
+  oldName: string,
+  newName: string,
+): Promise<MoveFragmentResult> {
+  const oldStem = stripMdSuffix(oldName);
+  const newStem = stripMdSuffix(newName);
+  const err = validateFragmentBasename(newStem);
+  if (err) throw new Error(err);
+  if (oldStem === newStem) {
+    throw new Error(`old and new name are the same: ${oldStem}`);
+  }
+
+  const projectDir = join(await getDocsSourceDir(), project);
+  if (!(await exists(projectDir))) {
+    throw new Error(`docs project not found: ${project}`);
+  }
+  const fromPath = join(projectDir, `${oldStem}.md`);
+  const toPath = join(projectDir, `${newStem}.md`);
+  if (!(await exists(fromPath))) {
+    throw new Error(`fragment not found: ${oldStem}.md`);
+  }
+  if (await exists(toPath)) {
+    throw new Error(`destination already exists: ${newStem}.md`);
+  }
+  await Deno.rename(fromPath, toPath);
+
+  let rewroteFragmentsArray = false;
+  const config = await loadConfig();
+  const entry = config.projects?.[project];
+  if (entry?.fragments) {
+    const oldFile = `${oldStem}.md`;
+    const newFile = `${newStem}.md`;
+    if (entry.fragments.includes(oldFile)) {
+      const next = entry.fragments.map((f) => f === oldFile ? newFile : f);
+      config.projects![project] = { ...entry, fragments: next };
+      await saveConfig(config);
+      rewroteFragmentsArray = true;
+    }
+  }
+  return { fromPath, toPath, rewroteFragmentsArray };
+}
+
+export interface RemoveFragmentResult {
+  removedPath: string;
+  rewroteFragmentsArray: boolean;
+}
+
+/**
+ * Delete a fragment under `<docs.source>/<project>/`. Source-only. If the
+ * project's `[projects.<name>].fragments` array references the basename, the
+ * entry is dropped from the array.
+ */
+export async function removeFragment(
+  project: string,
+  name: string,
+): Promise<RemoveFragmentResult> {
+  const stem = stripMdSuffix(name);
+  const projectDir = join(await getDocsSourceDir(), project);
+  if (!(await exists(projectDir))) {
+    throw new Error(`docs project not found: ${project}`);
+  }
+  const path = join(projectDir, `${stem}.md`);
+  if (!(await exists(path))) {
+    throw new Error(`fragment not found: ${stem}.md`);
+  }
+  await Deno.remove(path);
+
+  let rewroteFragmentsArray = false;
+  const config = await loadConfig();
+  const entry = config.projects?.[project];
+  const file = `${stem}.md`;
+  if (entry?.fragments && entry.fragments.includes(file)) {
+    const next = entry.fragments.filter((f) => f !== file);
+    config.projects![project] = { ...entry, fragments: next };
+    await saveConfig(config);
+    rewroteFragmentsArray = true;
+  }
+  return { removedPath: path, rewroteFragmentsArray };
+}
 
 // ============================================================================
 // Index compilation
@@ -385,6 +484,41 @@ export async function compileIndex(
 }
 
 // ============================================================================
+// Compile to source — write the index file under <docs.source>/<project>/
+// ============================================================================
+
+export interface CompileToSourceResult {
+  /** Absolute path to the compiled index in source. */
+  outputPath: string;
+  index: string;
+}
+
+/**
+ * Build the per-project index and write it to source as
+ * `<docs.source>/<project>/<index_filename>`. The artifact is git-trackable,
+ * user-visible, and shipped as-is by `rei docs sync` (no in-memory rebuild
+ * during sync). Re-running is idempotent.
+ */
+export async function compileDocsToSource(
+  project: string,
+  options: { fragments?: string[] } = {},
+): Promise<CompileToSourceResult> {
+  const config = await loadConfig();
+  const projectDir = join(await getDocsSourceDir(), project);
+  if (!(await exists(projectDir))) {
+    throw new Error(`docs project not found: ${project}`);
+  }
+  // The index path lives in the project source dir under the configured
+  // index filename so it is ready to ship one-for-one to <target>/<index_filename>.
+  const outputPath = join(projectDir, config.docs.index_filename);
+  const index = await compileIndex(project, projectDir, {
+    fragments: options.fragments,
+  });
+  await Deno.writeTextFile(outputPath, index);
+  return { outputPath, index };
+}
+
+// ============================================================================
 // Compile command — writes index + distributes fragments to a target dir
 // ============================================================================
 
@@ -458,9 +592,27 @@ export async function compileToTarget(
   }
 
   try {
+    // dc-R080/dc-R081: write the index to source first (git-trackable,
+    // visible), then ship that source artifact to the target.
+    const sourceIndexPath = join(
+      await getDocsSourceDir(),
+      project,
+      config.docs.index_filename,
+    );
+    await Deno.writeTextFile(sourceIndexPath, indexText);
+
     await Deno.mkdir(targetRoot, { recursive: true });
     await Deno.mkdir(fragmentsDir, { recursive: true });
-    await Deno.writeTextFile(indexPath, indexText);
+    if (method === 'symlink') {
+      // Replace any stale entry first.
+      try {
+        await Deno.lstat(indexPath);
+        await Deno.remove(indexPath);
+      } catch { /* nothing there */ }
+      await Deno.symlink(resolve(sourceIndexPath), indexPath);
+    } else {
+      await Deno.copyFile(sourceIndexPath, indexPath);
+    }
 
     // Clear any stale fragments in the target dir first — keeps rename/remove
     // propagation correct without tracking per-file state.
@@ -469,14 +621,15 @@ export async function compileToTarget(
       await Deno.remove(join(fragmentsDir, entry.name), { recursive: true });
     }
 
-    for (const f of selected) {
+    // Each fragment is independent — write them in parallel.
+    await Promise.all(selected.map(async (f) => {
       const dest = join(fragmentsDir, f.name);
       if (method === 'symlink') {
         await Deno.symlink(resolve(f.path), dest);
       } else {
         await Deno.copyFile(f.path, dest);
       }
-    }
+    }));
 
     return {
       project,
@@ -557,17 +710,19 @@ export async function syncDocs(
     }
   }
 
-  const runs: DocsSyncRun[] = [];
-  for (const { project, target, entry } of plan) {
-    const result = await compileToTarget(project, target, {
-      method: options.method,
-      dryRun: options.dryRun,
-      stdout: options.stdout,
-      fragments: entry.fragments,
-    });
-    runs.push({ project, target, result });
-  }
-  return runs;
+  // Each project compile + ship is independent — fan out across the plan.
+  return await Promise.all(
+    plan.map(async ({ project, target, entry }) => ({
+      project,
+      target,
+      result: await compileToTarget(project, target, {
+        method: options.method,
+        dryRun: options.dryRun,
+        stdout: options.stdout,
+        fragments: entry.fragments,
+      }),
+    })),
+  );
 }
 
 // ============================================================================

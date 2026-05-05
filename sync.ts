@@ -195,36 +195,33 @@ export async function syncSkill(
   if (targets.length === 0) return [];
 
   const method = resolveMethod(refreshed.sync_method, configEntry?.sync_method, options.method);
-  const results: SyncResult[] = [];
 
-  for (const target of targets) {
+  // Each target write is independent — fan out across targets.
+  return await Promise.all(targets.map(async (target): Promise<SyncResult> => {
     const targetPath = join(target.path, activeSkillName);
     const targetParent = dirname(target.path);
     if (!(await exists(targetParent))) {
-      results.push({
+      return {
         skillName: activeSkillName,
         target: target.name,
         targetPath,
         action: 'skipped',
         reason: `parent dir missing: ${targetParent}`,
-      });
-      continue;
+      };
     }
 
     if (options.dryRun) {
-      results.push({
+      return {
         skillName: activeSkillName,
         target: target.name,
         targetPath,
         action: method === 'symlink' ? 'symlinked' : 'copied',
         reason: 'dry run',
-      });
-      continue;
+      };
     }
 
     try {
       await Deno.mkdir(target.path, { recursive: true });
-      // Remove any prior entry (dir, file, or symlink) before writing.
       if (await exists(targetPath)) {
         await Deno.remove(targetPath, { recursive: true });
       } else {
@@ -236,36 +233,32 @@ export async function syncSkill(
       }
 
       if (method === 'symlink') {
-        // Use absolute path so the link works regardless of CWD.
         await Deno.symlink(resolve(skillSource), targetPath);
-        results.push({
+        return {
           skillName: activeSkillName,
           target: target.name,
           targetPath,
           action: 'symlinked',
-        });
-      } else {
-        await copy(skillSource, targetPath, { overwrite: true });
-        results.push({
-          skillName: activeSkillName,
-          target: target.name,
-          targetPath,
-          action: 'copied',
-        });
+        };
       }
+      await copy(skillSource, targetPath, { overwrite: true });
+      return {
+        skillName: activeSkillName,
+        target: target.name,
+        targetPath,
+        action: 'copied',
+      };
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);
-      results.push({
+      return {
         skillName: activeSkillName,
         target: target.name,
         targetPath,
         action: 'failed',
         reason: message,
-      });
+      };
     }
-  }
-
-  return results;
+  }));
 }
 
 /**
@@ -284,11 +277,13 @@ export async function syncAll(options: SyncOptions = {}): Promise<SyncResult[]> 
   }
   skillNames.sort();
 
-  const results: SyncResult[] = [];
-  for (const name of skillNames) {
-    results.push(...(await syncSkill(name, options)));
-  }
-  return results;
+  // Each skill's sync is independent — parallelize across skills. Within a
+  // skill, syncSkill still serializes per-target operations to keep its
+  // existing prefix-change semantics intact.
+  const perSkill = await Promise.all(
+    skillNames.map((name) => syncSkill(name, options)),
+  );
+  return perSkill.flat();
 }
 
 /**
@@ -304,9 +299,9 @@ export async function unsyncSkill(
   const targets = await resolveSkillTargets(entry, options.agents, config.agents);
   const results: SyncResult[] = [];
 
-  for (const target of targets) {
+  // Each agent target is independent — remove in parallel.
+  const perTarget = await Promise.all(targets.map(async (target): Promise<SyncResult> => {
     const targetPath = join(target.path, skillName);
-    // Use lstat so symlinks (even dangling) are detected.
     let present = false;
     try {
       await Deno.lstat(targetPath);
@@ -314,37 +309,36 @@ export async function unsyncSkill(
     } catch { /* missing */ }
 
     if (!present) {
-      results.push({
+      return {
         skillName,
         target: target.name,
         targetPath,
         action: 'skipped',
         reason: 'not present at target',
-      });
-      continue;
+      };
     }
 
     try {
       await Deno.remove(targetPath, { recursive: true });
-      results.push({
+      return {
         skillName,
         target: target.name,
         targetPath,
         action: 'copied', // reusing the tag; semantically "removed"
         reason: 'removed',
-      });
+      };
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);
-      results.push({
+      return {
         skillName,
         target: target.name,
         targetPath,
         action: 'failed',
         reason: message,
-      });
+      };
     }
-  }
-
+  }));
+  results.push(...perTarget);
   return results;
 }
 
@@ -1207,13 +1201,236 @@ async function renameSkillEverywhere(
   }
 }
 
-async function rekeySkillEntry(oldName: string, newName: string): Promise<void> {
+// ============================================================================
+// clean_on_sync — orphan detection
+// ============================================================================
+
+export type OrphanKind = 'skill' | 'rule';
+
+export interface Orphan {
+  kind: OrphanKind;
+  /** Agent that owns the target. */
+  agent: string;
+  /** Absolute path of the orphaned target file or directory. */
+  path: string;
+  /** Display name (e.g. skill name or rule basename). */
+  name: string;
+}
+
+/**
+ * Walk every configured agent target and collect entries that are present in
+ * the target but missing from source. Symlinks self-resolve so they aren't
+ * orphans — only real files/dirs are returned. Missing target paths are
+ * silently skipped.
+ *
+ * Restricted to skills (per-skill subdirs of `<agent.skills>`) and rules
+ * (direct `.md` files / dirs in `<agent.rules>`). Docs already self-clean
+ * via `compileToTarget`'s pre-write sweep.
+ */
+export async function findOrphans(
+  filterAgents?: string[],
+): Promise<Orphan[]> {
+  const config = await loadConfig();
+  const sourceDir = await getSourceDir();
+  const out: Orphan[] = [];
+
+  // Active source skill names (deactivated skills don't sync, so target dirs
+  // matching deactivated names are orphans too).
+  const activeSkillNames = new Set<string>();
+  if (await exists(sourceDir)) {
+    for await (const entry of Deno.readDir(sourceDir)) {
+      if (entry.isDirectory && !entry.name.startsWith('_')) {
+        activeSkillNames.add(entry.name);
+      }
+    }
+  }
+
+  // Active source rule basenames (file form; directory rules sync as dirs).
+  const rulesSource = expandHome(config.rules.source);
+  const sourceRuleNames = new Set<string>();
+  if (await exists(rulesSource)) {
+    for await (const entry of Deno.readDir(rulesSource)) {
+      if (entry.name.startsWith('.')) continue;
+      sourceRuleNames.add(entry.name);
+    }
+  }
+
+  // Each agent's walk is independent — fan out across agents.
+  const perAgent = await Promise.all(
+    Object.entries(config.agents)
+      .filter(([name]) => !filterAgents || filterAgents.includes(name))
+      .map(async ([agentName, agent]): Promise<Orphan[]> => {
+        const found: Orphan[] = [];
+
+        // Skills targets: each first-level child is a skill dir.
+        const skillsTarget = expandHome(agent.skills);
+        if (await exists(skillsTarget)) {
+          for await (const entry of Deno.readDir(skillsTarget)) {
+            if (entry.name.startsWith('.')) continue;
+            const path = join(skillsTarget, entry.name);
+            try {
+              const lst = await Deno.lstat(path);
+              if (lst.isSymlink) continue;
+            } catch { continue; }
+            if (!activeSkillNames.has(entry.name)) {
+              found.push({ kind: 'skill', agent: agentName, path, name: entry.name });
+            }
+          }
+        }
+
+        // Rules targets: every direct child (file or dir) under the rules path.
+        const rulesTarget = expandHome(agent.rules);
+        if (await exists(rulesTarget)) {
+          for await (const entry of Deno.readDir(rulesTarget)) {
+            if (entry.name.startsWith('.')) continue;
+            if (
+              agent.compile === true &&
+              (agent.compile_file ?? 'AGENTS.md') === entry.name &&
+              (agent.compile_root === undefined ||
+                expandHome(agent.compile_root) === rulesTarget)
+            ) {
+              continue;
+            }
+            const path = join(rulesTarget, entry.name);
+            try {
+              const lst = await Deno.lstat(path);
+              if (lst.isSymlink) continue;
+            } catch { continue; }
+            if (!sourceRuleNames.has(entry.name)) {
+              found.push({ kind: 'rule', agent: agentName, path, name: entry.name });
+            }
+          }
+        }
+        return found;
+      }),
+  );
+
+  out.push(...perAgent.flat());
+  return out;
+}
+
+/**
+ * Remove every orphan path. Returns one result per attempt. Best-effort —
+ * failures are reported, not thrown.
+ */
+export async function cleanOrphans(
+  orphans: Orphan[],
+): Promise<{ orphan: Orphan; ok: boolean; reason?: string }[]> {
+  const out: { orphan: Orphan; ok: boolean; reason?: string }[] = [];
+  for (const o of orphans) {
+    try {
+      await Deno.remove(o.path, { recursive: true });
+      out.push({ orphan: o, ok: true });
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      out.push({ orphan: o, ok: false, reason: message });
+    }
+  }
+  return out;
+}
+
+// ============================================================================
+// Skills source-side CRUD: move and remove
+// ============================================================================
+
+export interface MoveSkillResult {
+  fromPath: string;
+  toPath: string;
+  rekeyedLockfile: boolean;
+  rekeyedSkillOverrides: boolean;
+}
+
+/**
+ * Rename a skill in source. Source-only — target cleanup happens on the next
+ * sync. Re-keys the lockfile and `[skill_overrides.<name>]` if present. Refuses
+ * to clobber an existing skill at the new name.
+ */
+export async function moveSkill(
+  oldName: string,
+  newName: string,
+): Promise<MoveSkillResult> {
+  if (oldName === newName) {
+    throw new Error(`old and new name are the same: ${oldName}`);
+  }
+  if (!newName || newName.includes('/') || newName.includes('\\')) {
+    throw new Error('invalid new skill name');
+  }
+  const sourceDir = await getSourceDir();
+  const fromPath = join(sourceDir, oldName);
+  const toPath = join(sourceDir, newName);
+  if (!(await exists(fromPath))) {
+    throw new Error(`skill not found in source: ${oldName}`);
+  }
+  if (await exists(toPath)) {
+    throw new Error(`destination already exists: ${newName}`);
+  }
+  await Deno.rename(fromPath, toPath);
+
+  const rekeyedLockfile = await rekeySkillEntry(oldName, newName);
+
+  let rekeyedSkillOverrides = false;
+  const config = await loadConfig();
+  const overrides = config.skill_overrides;
+  if (overrides && oldName in overrides) {
+    const next: Record<string, typeof overrides[string]> = { ...overrides };
+    next[newName] = next[oldName];
+    delete next[oldName];
+    config.skill_overrides = next;
+    await saveConfig(config);
+    rekeyedSkillOverrides = true;
+  }
+
+  return { fromPath, toPath, rekeyedLockfile, rekeyedSkillOverrides };
+}
+
+export interface RemoveSkillResult {
+  removedPath: string;
+  removedFromLockfile: boolean;
+  removedFromSkillOverrides: boolean;
+}
+
+/**
+ * Delete a skill from source. Source-only — target cleanup happens on the
+ * next sync. Drops any matching lockfile entry and any matching
+ * `[skill_overrides.<name>]` entry from config.
+ */
+export async function removeSkill(name: string): Promise<RemoveSkillResult> {
+  const sourceDir = await getSourceDir();
+  const sourcePath = join(sourceDir, name);
+  if (!(await exists(sourcePath))) {
+    throw new Error(`skill not found in source: ${name}`);
+  }
+  await Deno.remove(sourcePath, { recursive: true });
+
+  let removedFromLockfile = false;
+  const lockfile = await loadLockfile();
+  if (name in lockfile.skills) {
+    delete lockfile.skills[name];
+    await saveLockfile(lockfile);
+    removedFromLockfile = true;
+  }
+
+  let removedFromSkillOverrides = false;
+  const config = await loadConfig();
+  if (config.skill_overrides && name in config.skill_overrides) {
+    const next = { ...config.skill_overrides };
+    delete next[name];
+    config.skill_overrides = next;
+    await saveConfig(config);
+    removedFromSkillOverrides = true;
+  }
+
+  return { removedPath: sourcePath, removedFromLockfile, removedFromSkillOverrides };
+}
+
+async function rekeySkillEntry(oldName: string, newName: string): Promise<boolean> {
   const lockfile = await loadLockfile();
   const entry = lockfile.skills[oldName];
-  if (!entry) return;
+  if (!entry) return false;
   delete lockfile.skills[oldName];
   lockfile.skills[newName] = entry;
   await saveLockfile(lockfile);
+  return true;
 }
 
 async function dupeSkillEntry(
@@ -1273,62 +1490,47 @@ export async function checkForUpdates(
   const lockfile = await loadLockfile();
   const configSkills = config.skill_overrides ?? {};
   const names = skillName ? [skillName] : Object.keys(lockfile.skills);
-  const results: UpdateCheck[] = [];
 
-  for (const name of names) {
+  // Each per-skill check is an independent network call — fan out.
+  return await Promise.all(names.map(async (name): Promise<UpdateCheck> => {
     const entry = lockfile.skills[name];
     if (!entry) {
-      results.push({ skillName: name, hasUpdate: false, skipped: true, reason: 'not tracked' });
-      continue;
+      return { skillName: name, hasUpdate: false, skipped: true, reason: 'not tracked' };
     }
     if (configSkills[name]?.updates === false) {
-      results.push({ skillName: name, hasUpdate: false, skipped: true, reason: 'disabled per-skill' });
-      continue;
+      return { skillName: name, hasUpdate: false, skipped: true, reason: 'disabled per-skill' };
     }
     if (!entry.source_url || !entry.ref) {
-      results.push({ skillName: name, hasUpdate: false, skipped: true, reason: 'missing source_url/ref' });
-      continue;
+      return { skillName: name, hasUpdate: false, skipped: true, reason: 'missing source_url/ref' };
     }
     const url = commitShaUrl(entry.source_url, entry.ref);
     if (!url) {
-      results.push({ skillName: name, hasUpdate: false, skipped: true, reason: 'unsupported source_url' });
-      continue;
+      return { skillName: name, hasUpdate: false, skipped: true, reason: 'unsupported source_url' };
     }
     let response: Response;
     try {
       response = await fetcher(url);
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);
-      results.push({ skillName: name, hasUpdate: false, skipped: true, reason: `fetch error: ${message}` });
-      continue;
+      return { skillName: name, hasUpdate: false, skipped: true, reason: `fetch error: ${message}` };
     }
     if (!response.ok) {
-      results.push({
-        skillName: name,
-        hasUpdate: false,
-        skipped: true,
-        reason: `HTTP ${response.status}`,
-      });
-      continue;
+      return { skillName: name, hasUpdate: false, skipped: true, reason: `HTTP ${response.status}` };
     }
     let body: { sha?: string };
     try {
       body = await response.json();
     } catch {
-      results.push({ skillName: name, hasUpdate: false, skipped: true, reason: 'invalid JSON' });
-      continue;
+      return { skillName: name, hasUpdate: false, skipped: true, reason: 'invalid JSON' };
     }
     const sha = body.sha;
     if (!sha) {
-      results.push({ skillName: name, hasUpdate: false, skipped: true, reason: 'no sha in response' });
-      continue;
+      return { skillName: name, hasUpdate: false, skipped: true, reason: 'no sha in response' };
     }
     const previousSha = entry.sha;
     const hasUpdate = previousSha !== undefined && previousSha !== sha;
-    results.push({ skillName: name, hasUpdate, remoteSha: sha, previousSha });
-  }
-
-  return results;
+    return { skillName: name, hasUpdate, remoteSha: sha, previousSha };
+  }));
 }
 
 /**

@@ -464,6 +464,38 @@ Deno.test('status untracked: no synced_at means never stale or diverged', async 
   }
 });
 
+Deno.test('per-skill agents allowlist restricts which agents receive the skill (sy-R022)', async () => {
+  const env = await setupIsolatedEnv();
+  try {
+    await withEnv(env.env, async () => {
+      await seedSkill(env.sourceDir, 'alpha');
+      const claudeSkills = join(env.home, '.claude', 'skills');
+      const otherSkills = join(env.home, '.other', 'skills');
+      await Deno.mkdir(claudeSkills, { recursive: true });
+      await Deno.mkdir(otherSkills, { recursive: true });
+      await patchConfig(env.configPath, {
+        agents: {
+          claude: { skills: claudeSkills, rules: join(env.home, '.claude', 'rules') },
+          other: { skills: otherSkills, rules: join(env.home, '.other', 'rules') },
+        },
+        skill_overrides: {
+          // alpha should land in claude only, not other.
+          alpha: { agents: ['claude'] },
+        },
+      });
+      resetPathCache();
+
+      const results = await syncSkill('alpha');
+      const targets = results.map((r) => r.target).sort();
+      assertEquals(targets, ['claude']);
+      assert(await exists(join(claudeSkills, 'alpha', 'SKILL.md')));
+      assert(!(await exists(join(otherSkills, 'alpha'))));
+    });
+  } finally {
+    await env.cleanup();
+  }
+});
+
 Deno.test('status symlink: never stale or diverged', async () => {
   const env = await setupIsolatedEnv({ sync_method: 'symlink' });
   try {
