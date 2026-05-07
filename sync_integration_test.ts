@@ -12,7 +12,9 @@ import { addSkill } from './reishi.ts';
 import { resetPathCache } from './paths.ts';
 import {
   fakeFetchGithub,
-  makeFixtureTarball,
+  type IsolatedEnv,
+  seedRemoteRepo,
+  seedSourceDir,
   setupIsolatedEnv,
 } from './test-helpers.ts';
 
@@ -46,7 +48,7 @@ async function ensureTargetParents(home: string): Promise<string> {
 
 Deno.test('add: installs to source AND syncs to target', async () => {
   const env = await setupIsolatedEnv();
-  const tarball = await makeFixtureTarball('single-skill-repo');
+  const tarball = await seedRemoteRepo(env, { fixtureName: 'single-skill-repo' });
   try {
     await withEnv(env.env, async () => {
       const claudeTarget = await ensureTargetParents(env.home);
@@ -65,16 +67,13 @@ Deno.test('add: installs to source AND syncs to target', async () => {
       );
     });
   } finally {
-    try {
-      await Deno.remove(tarball);
-    } catch { /* ignore */ }
     await env.cleanup();
   }
 });
 
 Deno.test('add: --path outside source does NOT trigger sync', async () => {
   const env = await setupIsolatedEnv();
-  const tarball = await makeFixtureTarball('single-skill-repo');
+  const tarball = await seedRemoteRepo(env, { fixtureName: 'single-skill-repo' });
   try {
     await withEnv(env.env, async () => {
       const claudeTarget = await ensureTargetParents(env.home);
@@ -97,16 +96,13 @@ Deno.test('add: --path outside source does NOT trigger sync', async () => {
       }
     });
   } finally {
-    try {
-      await Deno.remove(tarball);
-    } catch { /* ignore */ }
     await env.cleanup();
   }
 });
 
 Deno.test('add: silently skips sync when target parent is missing', async () => {
   const env = await setupIsolatedEnv();
-  const tarball = await makeFixtureTarball('single-skill-repo');
+  const tarball = await seedRemoteRepo(env, { fixtureName: 'single-skill-repo' });
   try {
     await withEnv(env.env, async () => {
       // No ensureTargetParents call — target parent doesn't exist.
@@ -120,16 +116,13 @@ Deno.test('add: silently skips sync when target parent is missing', async () => 
       assert(!(await exists(join(env.home, '.claude', 'skills', 'single-skill-repo'))));
     });
   } finally {
-    try {
-      await Deno.remove(tarball);
-    } catch { /* ignore */ }
     await env.cleanup();
   }
 });
 
 Deno.test('add (multi-skill): every installed skill lands in target', async () => {
   const env = await setupIsolatedEnv();
-  const tarball = await makeFixtureTarball('multi-skill-repo');
+  const tarball = await seedRemoteRepo(env, { fixtureName: 'multi-skill-repo' });
   try {
     await withEnv(env.env, async () => {
       const claudeTarget = await ensureTargetParents(env.home);
@@ -143,9 +136,6 @@ Deno.test('add (multi-skill): every installed skill lands in target', async () =
       assert(await exists(join(claudeTarget, 'readwise-cli', 'SKILL.md')));
     });
   } finally {
-    try {
-      await Deno.remove(tarball);
-    } catch { /* ignore */ }
     await env.cleanup();
   }
 });
@@ -162,12 +152,7 @@ Deno.test('deactivate flow: unsyncSkill removes from target', async () => {
     await withEnv(env.env, async () => {
       const claudeTarget = await ensureTargetParents(env.home);
       // Seed a skill and sync it.
-      const skillDir = join(env.sourceDir, 'alpha');
-      await Deno.mkdir(join(skillDir, 'scripts'), { recursive: true });
-      await Deno.writeTextFile(
-        join(skillDir, 'SKILL.md'),
-        '---\nname: alpha\ndescription: test\n---\n',
-      );
+      await seedSourceDir(env, { skills: { alpha: {} } });
       await syncSkill('alpha');
       assert(await exists(join(claudeTarget, 'alpha')));
 
@@ -189,12 +174,7 @@ Deno.test('activate flow: syncSkill re-adds to target after reactivation', async
   try {
     await withEnv(env.env, async () => {
       const claudeTarget = await ensureTargetParents(env.home);
-      const skillDir = join(env.sourceDir, 'alpha');
-      await Deno.mkdir(join(skillDir, 'scripts'), { recursive: true });
-      await Deno.writeTextFile(
-        join(skillDir, 'SKILL.md'),
-        '---\nname: alpha\ndescription: test\n---\n',
-      );
+      await seedSourceDir(env, { skills: { alpha: {} } });
       await syncSkill('alpha');
       await unsyncSkill('alpha');
       assert(!(await exists(join(claudeTarget, 'alpha'))));
@@ -248,19 +228,12 @@ async function runCli(
   };
 }
 
-async function seedSkillAndRule(env: Awaited<ReturnType<typeof setupIsolatedEnv>>): Promise<void> {
+async function seedSkillAndRule(env: IsolatedEnv): Promise<void> {
   await ensureTargetParents(env.home);
-  // Skill
-  const skillDir = join(env.sourceDir, 'alpha');
-  await Deno.mkdir(join(skillDir, 'scripts'), { recursive: true });
-  await Deno.writeTextFile(
-    join(skillDir, 'SKILL.md'),
-    '---\nname: alpha\ndescription: test\n---\n',
-  );
-  // Rule
-  const rulesDir = join(env.home, '.config', 'reishi', 'rules');
-  await Deno.mkdir(rulesDir, { recursive: true });
-  await Deno.writeTextFile(join(rulesDir, 'no-deletes.md'), '# No Deletes\n');
+  await seedSourceDir(env, {
+    skills: { alpha: {} },
+    rules: { 'no-deletes.md': '# No Deletes\n' },
+  });
 }
 
 Deno.test('rei sync (no args): syncs both skills and rules', async () => {
@@ -309,7 +282,6 @@ Deno.test('rei rules sync: skills are untouched', async () => {
 Deno.test('syncAll + syncRules: both content types land at their respective targets', async () => {
   const { syncAll } = await import('./sync.ts');
   const { syncRules } = await import('./rules.ts');
-  const { fixturesPath } = await import('./test-helpers.ts');
   const env = await setupIsolatedEnv();
   try {
     await withEnv(env.env, async () => {
@@ -318,21 +290,10 @@ Deno.test('syncAll + syncRules: both content types land at their respective targ
       // Rules target parent — config's default puts it at <home>/.claude/rules
       // so .claude already exists from ensureTargetParents.
 
-      // Seed a skill directly.
-      const skillDir = join(env.sourceDir, 'alpha');
-      await Deno.mkdir(join(skillDir, 'scripts'), { recursive: true });
-      await Deno.writeTextFile(
-        join(skillDir, 'SKILL.md'),
-        '---\nname: alpha\ndescription: test\n---\n',
-      );
-
-      // Seed a rule directly into the isolated rules source.
-      const rulesDir = join(env.home, '.config', 'reishi', 'rules');
-      await Deno.mkdir(rulesDir, { recursive: true });
-      await Deno.copyFile(
-        fixturesPath('rules', 'no-deletes.md'),
-        join(rulesDir, 'no-deletes.md'),
-      );
+      await seedSourceDir(env, {
+        skills: { alpha: {} },
+        rules: { 'no-deletes.md': '# No Deletes\n' },
+      });
 
       const skillResults = await syncAll();
       const ruleResults = await syncRules();

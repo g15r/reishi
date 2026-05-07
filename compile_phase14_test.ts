@@ -19,7 +19,7 @@ import {
   syncRules,
 } from './rules.ts';
 import { compileDocsToSource, compileToTarget } from './docs.ts';
-import { setupIsolatedEnv } from './test-helpers.ts';
+import { seedSourceDir, setupIsolatedEnv } from './test-helpers.ts';
 
 async function withEnv(
   env: Record<string, string>,
@@ -96,10 +96,9 @@ Deno.test('compileRules: writes <rules.source>/AGENTS.md by default', async () =
   const env = await setupIsolatedEnv();
   try {
     await withEnv(env.env, async () => {
-      const rulesDir = join(env.home, '.config', 'reishi', 'rules');
-      await Deno.mkdir(rulesDir, { recursive: true });
-      await Deno.writeTextFile(join(rulesDir, 'a.md'), '# A\nbody-a\n');
-      await Deno.writeTextFile(join(rulesDir, 'b.md'), '# B\nbody-b\n');
+      const { rulesDir } = await seedSourceDir(env, {
+        rules: { 'a.md': '# A\nbody-a\n', 'b.md': '# B\nbody-b\n' },
+      });
 
       const result = await compileRules();
       assertEquals(result.outputPath, join(rulesDir, COMPILED_RULES_FILENAME));
@@ -121,9 +120,7 @@ Deno.test('compileRules: excludes the artifact itself on re-run', async () => {
   const env = await setupIsolatedEnv();
   try {
     await withEnv(env.env, async () => {
-      const rulesDir = join(env.home, '.config', 'reishi', 'rules');
-      await Deno.mkdir(rulesDir, { recursive: true });
-      await Deno.writeTextFile(join(rulesDir, 'a.md'), '# A\n');
+      await seedSourceDir(env, { rules: { 'a.md': '# A\n' } });
       const first = await compileRules();
       assertEquals(first.fragmentCount, 1);
 
@@ -144,9 +141,8 @@ Deno.test('compileDocsToSource: writes index into <docs.source>/<project>/', asy
   const env = await setupIsolatedEnv();
   try {
     await withEnv(env.env, async () => {
+      await seedSourceDir(env, { docs: { p: { 'one.md': '# One\nbody' } } });
       const projectDir = join(env.docsDir, 'p');
-      await Deno.mkdir(projectDir, { recursive: true });
-      await Deno.writeTextFile(join(projectDir, 'one.md'), '# One\nbody');
 
       const result = await compileDocsToSource('p');
       assertEquals(result.outputPath, join(projectDir, 'AGENTS.md'));
@@ -178,9 +174,8 @@ Deno.test('compileToTarget: writes the index to source first, then ships', async
   const env = await setupIsolatedEnv();
   try {
     await withEnv(env.env, async () => {
+      await seedSourceDir(env, { docs: { p: { 'one.md': '# One\n' } } });
       const projectDir = join(env.docsDir, 'p');
-      await Deno.mkdir(projectDir, { recursive: true });
-      await Deno.writeTextFile(join(projectDir, 'one.md'), '# One\n');
       const targetRoot = join(env.home, 'projects', 'sample');
       await Deno.mkdir(targetRoot, { recursive: true });
 
@@ -204,9 +199,7 @@ Deno.test('syncRules: compile=true ships <compile_root>/<compile_file>', async (
   const env = await setupIsolatedEnv();
   try {
     await withEnv(env.env, async () => {
-      const rulesDir = join(env.home, '.config', 'reishi', 'rules');
-      await Deno.mkdir(rulesDir, { recursive: true });
-      await Deno.writeTextFile(join(rulesDir, 'one.md'), '# One\nbody-one\n');
+      await seedSourceDir(env, { rules: { 'one.md': '# One\nbody-one\n' } });
       await Deno.mkdir(join(env.home, '.claude'), { recursive: true });
       await patchConfig(env.configPath, {
         agents: {
@@ -239,9 +232,7 @@ Deno.test('syncRules: compile=true rejects path-escaping compile_file', async ()
   const env = await setupIsolatedEnv();
   try {
     await withEnv(env.env, async () => {
-      const rulesDir = join(env.home, '.config', 'reishi', 'rules');
-      await Deno.mkdir(rulesDir, { recursive: true });
-      await Deno.writeTextFile(join(rulesDir, 'one.md'), '# One\n');
+      await seedSourceDir(env, { rules: { 'one.md': '# One\n' } });
       await Deno.mkdir(join(env.home, '.claude'), { recursive: true });
       await patchConfig(env.configPath, {
         agents: {
@@ -270,9 +261,7 @@ Deno.test('syncRules: compile=false (default) does not ship a compile artifact',
   const env = await setupIsolatedEnv();
   try {
     await withEnv(env.env, async () => {
-      const rulesDir = join(env.home, '.config', 'reishi', 'rules');
-      await Deno.mkdir(rulesDir, { recursive: true });
-      await Deno.writeTextFile(join(rulesDir, 'one.md'), '# One\n');
+      await seedSourceDir(env, { rules: { 'one.md': '# One\n' } });
       await Deno.mkdir(join(env.home, '.claude'), { recursive: true });
       const results = await syncRules();
       assert(!results.some((r) => r.ruleName === '(compile)'));

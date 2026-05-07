@@ -13,7 +13,9 @@ import { resetPathCache } from './paths.ts';
 import { fetchUpstream, pullSkill, syncSkill } from './sync.ts';
 import {
   fakeFetchGithub,
-  makeFixtureTarball,
+  type IsolatedEnv,
+  seedRemoteRepo,
+  seedSourceDir,
   setupIsolatedEnv,
 } from './test-helpers.ts';
 
@@ -69,24 +71,25 @@ function shaAwareFetcher(tarballPath: string, sha: string) {
   };
 }
 
-async function seedSkill(sourceDir: string, name: string): Promise<string> {
-  const dir = join(sourceDir, name);
-  await Deno.mkdir(join(dir, 'scripts'), { recursive: true });
-  await Deno.writeTextFile(
-    join(dir, 'SKILL.md'),
-    `---\nname: ${name}\ndescription: stale\n---\n`,
-  );
-  await Deno.writeTextFile(join(dir, 'scripts', 'run.sh'), '#!/bin/sh\necho old\n');
-  return dir;
+async function seedSkill(env: IsolatedEnv, name: string): Promise<string> {
+  const { skillsDir } = await seedSourceDir(env, {
+    skills: {
+      [name]: {
+        'SKILL.md': `---\nname: ${name}\ndescription: stale\n---\n`,
+        'scripts/run.sh': '#!/bin/sh\necho old\n',
+      },
+    },
+  });
+  return join(skillsDir, name);
 }
 
 Deno.test('pull (tracked): pulls upstream, overwrites source, updates synced_at', async () => {
   const env = await setupIsolatedEnv();
-  const tarball = await makeFixtureTarball('single-skill-repo');
+  const tarball = await seedRemoteRepo(env, { fixtureName: 'single-skill-repo' });
   try {
     await withEnv(env.env, async () => {
       // Seed a stale "local" copy that the fetch will overwrite.
-      await seedSkill(env.sourceDir, 'single-skill-repo');
+      await seedSkill(env, 'single-skill-repo');
       await Deno.mkdir(join(env.home, '.claude', 'skills'), { recursive: true });
 
       // Use a past synced_at and back-date the seed files so they look in
@@ -137,9 +140,6 @@ Deno.test('pull (tracked): pulls upstream, overwrites source, updates synced_at'
       assert(result.sync.some((r) => r.action === 'copied' || r.action === 'symlinked'));
     });
   } finally {
-    try {
-      await Deno.remove(tarball);
-    } catch { /* ignore */ }
     await env.cleanup();
   }
 });
@@ -148,7 +148,7 @@ Deno.test('sync (untracked): no upstream fetch, only target sync', async () => {
   const env = await setupIsolatedEnv();
   try {
     await withEnv(env.env, async () => {
-      await seedSkill(env.sourceDir, 'plain');
+      await seedSkill(env, 'plain');
       await Deno.mkdir(join(env.home, '.claude', 'skills'), { recursive: true });
 
       // Note: no fetcher injected — if fetchUpstream tried to run, it'd hit fetch().
@@ -169,7 +169,7 @@ Deno.test('sync on a tracked skill never hits the network', async () => {
   const env = await setupIsolatedEnv();
   try {
     await withEnv(env.env, async () => {
-      await seedSkill(env.sourceDir, 'single-skill-repo');
+      await seedSkill(env, 'single-skill-repo');
       await Deno.mkdir(join(env.home, '.claude', 'skills'), { recursive: true });
       await writeLockfile(env.lockfilePath, {
         skills: {
@@ -201,10 +201,10 @@ Deno.test('sync on a tracked skill never hits the network', async () => {
 
 Deno.test('pull (--dry-run): no source write, no synced_at advance', async () => {
   const env = await setupIsolatedEnv();
-  const tarball = await makeFixtureTarball('single-skill-repo');
+  const tarball = await seedRemoteRepo(env, { fixtureName: 'single-skill-repo' });
   try {
     await withEnv(env.env, async () => {
-      await seedSkill(env.sourceDir, 'single-skill-repo');
+      await seedSkill(env, 'single-skill-repo');
       await Deno.mkdir(join(env.home, '.claude', 'skills'), { recursive: true });
       const initialSynced = new Date(Date.now() + 60_000).toISOString();
       await writeLockfile(env.lockfilePath, {
@@ -233,19 +233,16 @@ Deno.test('pull (--dry-run): no source write, no synced_at advance', async () =>
       assertEquals(after, initialSynced);
     });
   } finally {
-    try {
-      await Deno.remove(tarball);
-    } catch { /* ignore */ }
     await env.cleanup();
   }
 });
 
 Deno.test('pull (diverged file): protects local, saves upstream as _1', async () => {
   const env = await setupIsolatedEnv();
-  const tarball = await makeFixtureTarball('single-skill-repo');
+  const tarball = await seedRemoteRepo(env, { fixtureName: 'single-skill-repo' });
   try {
     await withEnv(env.env, async () => {
-      await seedSkill(env.sourceDir, 'single-skill-repo');
+      await seedSkill(env, 'single-skill-repo');
       // synced_at is OLDER than the seed mtime → SKILL.md and scripts/run.sh
       // are both "locally modified".
       await writeLockfile(env.lockfilePath, {
@@ -286,19 +283,16 @@ Deno.test('pull (diverged file): protects local, saves upstream as _1', async ()
       );
     });
   } finally {
-    try {
-      await Deno.remove(tarball);
-    } catch { /* ignore */ }
     await env.cleanup();
   }
 });
 
 Deno.test('pull (unchanged files): overwrites cleanly with upstream', async () => {
   const env = await setupIsolatedEnv();
-  const tarball = await makeFixtureTarball('single-skill-repo');
+  const tarball = await seedRemoteRepo(env, { fixtureName: 'single-skill-repo' });
   try {
     await withEnv(env.env, async () => {
-      await seedSkill(env.sourceDir, 'single-skill-repo');
+      await seedSkill(env, 'single-skill-repo');
       // Back-date seed files so they look unchanged relative to synced_at.
       const oldMtime = new Date(Date.now() - 600_000);
       await Deno.utime(
@@ -341,19 +335,16 @@ Deno.test('pull (unchanged files): overwrites cleanly with upstream', async () =
       assertEquals(result.fetch.protected?.length ?? 0, 0);
     });
   } finally {
-    try {
-      await Deno.remove(tarball);
-    } catch { /* ignore */ }
     await env.cleanup();
   }
 });
 
 Deno.test('pull (multiple pulls over diverged files): suffix increments _1, _2, _3', async () => {
   const env = await setupIsolatedEnv();
-  const tarball = await makeFixtureTarball('single-skill-repo');
+  const tarball = await seedRemoteRepo(env, { fixtureName: 'single-skill-repo' });
   try {
     await withEnv(env.env, async () => {
-      await seedSkill(env.sourceDir, 'single-skill-repo');
+      await seedSkill(env, 'single-skill-repo');
       await writeLockfile(env.lockfilePath, {
         skills: {
           'single-skill-repo': {
@@ -398,21 +389,18 @@ Deno.test('pull (multiple pulls over diverged files): suffix increments _1, _2, 
       assert(await exists(join(env.sourceDir, 'single-skill-repo', 'SKILL_3.md')));
     });
   } finally {
-    try {
-      await Deno.remove(tarball);
-    } catch { /* ignore */ }
     await env.cleanup();
   }
 });
 
 Deno.test('sync (multi-skill repo): only the requested skill is synced from the same repo', async () => {
   const env = await setupIsolatedEnv();
-  const tarball = await makeFixtureTarball('multi-skill-repo');
+  const tarball = await seedRemoteRepo(env, { fixtureName: 'multi-skill-repo' });
   try {
     await withEnv(env.env, async () => {
       // Seed two siblings from the same upstream repo.
-      await seedSkill(env.sourceDir, 'book-review');
-      await seedSkill(env.sourceDir, 'readwise-cli');
+      await seedSkill(env, 'book-review');
+      await seedSkill(env, 'readwise-cli');
       await Deno.mkdir(join(env.home, '.claude', 'skills'), { recursive: true });
 
       const sharedUrl = 'https://github.com/fakeorg/multi-skill-repo';
@@ -444,19 +432,16 @@ Deno.test('sync (multi-skill repo): only the requested skill is synced from the 
       assert(rc.includes('description: stale'), 'sibling skill should not have been touched');
     });
   } finally {
-    try {
-      await Deno.remove(tarball);
-    } catch { /* ignore */ }
     await env.cleanup();
   }
 });
 
 Deno.test('pull (SHA match): skips download when lockfile sha matches remote', async () => {
   const env = await setupIsolatedEnv();
-  const tarball = await makeFixtureTarball('single-skill-repo');
+  const tarball = await seedRemoteRepo(env, { fixtureName: 'single-skill-repo' });
   try {
     await withEnv(env.env, async () => {
-      await seedSkill(env.sourceDir, 'single-skill-repo');
+      await seedSkill(env, 'single-skill-repo');
       await Deno.mkdir(join(env.home, '.claude', 'skills'), { recursive: true });
       const initialSha = 'abc123';
       const initialSynced = new Date(Date.now() - 5_000).toISOString();
@@ -489,19 +474,16 @@ Deno.test('pull (SHA match): skips download when lockfile sha matches remote', a
       assertEquals(lock.skills['single-skill-repo'].synced_at, initialSynced);
     });
   } finally {
-    try {
-      await Deno.remove(tarball);
-    } catch { /* ignore */ }
     await env.cleanup();
   }
 });
 
 Deno.test('pull (SHA mismatch): fetches and updates lockfile sha + synced_at', async () => {
   const env = await setupIsolatedEnv();
-  const tarball = await makeFixtureTarball('single-skill-repo');
+  const tarball = await seedRemoteRepo(env, { fixtureName: 'single-skill-repo' });
   try {
     await withEnv(env.env, async () => {
-      await seedSkill(env.sourceDir, 'single-skill-repo');
+      await seedSkill(env, 'single-skill-repo');
       await Deno.mkdir(join(env.home, '.claude', 'skills'), { recursive: true });
       const oldMtime = new Date(Date.now() - 60_000);
       await Deno.utime(
@@ -549,19 +531,16 @@ Deno.test('pull (SHA mismatch): fetches and updates lockfile sha + synced_at', a
       );
     });
   } finally {
-    try {
-      await Deno.remove(tarball);
-    } catch { /* ignore */ }
     await env.cleanup();
   }
 });
 
 Deno.test('fetchUpstream (direct): exposes structured diff for tracked skill', async () => {
   const env = await setupIsolatedEnv();
-  const tarball = await makeFixtureTarball('single-skill-repo');
+  const tarball = await seedRemoteRepo(env, { fixtureName: 'single-skill-repo' });
   try {
     await withEnv(env.env, async () => {
-      await seedSkill(env.sourceDir, 'single-skill-repo');
+      await seedSkill(env, 'single-skill-repo');
       await writeLockfile(env.lockfilePath, {
         skills: {
           'single-skill-repo': {
@@ -584,9 +563,6 @@ Deno.test('fetchUpstream (direct): exposes structured diff for tracked skill', a
       assert(result.diff.modified.includes('SKILL.md'));
     });
   } finally {
-    try {
-      await Deno.remove(tarball);
-    } catch { /* ignore */ }
     await env.cleanup();
   }
 });

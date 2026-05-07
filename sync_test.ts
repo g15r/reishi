@@ -15,7 +15,7 @@ import {
   syncStatus,
   unsyncSkill,
 } from './sync.ts';
-import { setupIsolatedEnv } from './test-helpers.ts';
+import { type IsolatedEnv, seedSourceDir, setupIsolatedEnv } from './test-helpers.ts';
 
 async function withEnv(
   env: Record<string, string>,
@@ -39,8 +39,21 @@ async function withEnv(
 }
 
 /** Seed a fake skill dir with a SKILL.md and a nested file. */
-async function seedSkill(sourceDir: string, name: string): Promise<string> {
-  const dir = join(sourceDir, name);
+async function seedSkill(env: IsolatedEnv, name: string): Promise<string> {
+  const { skillsDir } = await seedSourceDir(env, {
+    skills: {
+      [name]: {
+        'SKILL.md': `---\nname: ${name}\ndescription: test\n---\n`,
+        'scripts/run.sh': '#!/bin/sh\necho hi\n',
+      },
+    },
+  });
+  return join(skillsDir, name);
+}
+
+/** Same shape, but write the skill under `_deactivated/` so syncAll skips it. */
+async function seedDeactivatedSkill(env: IsolatedEnv, name: string): Promise<string> {
+  const dir = join(env.sourceDir, '_deactivated', name);
   await Deno.mkdir(join(dir, 'scripts'), { recursive: true });
   await Deno.writeTextFile(join(dir, 'SKILL.md'), `---\nname: ${name}\ndescription: test\n---\n`);
   await Deno.writeTextFile(join(dir, 'scripts', 'run.sh'), '#!/bin/sh\necho hi\n');
@@ -73,7 +86,7 @@ Deno.test('syncSkill copy: produces independent files at target', async () => {
   const env = await setupIsolatedEnv();
   try {
     await withEnv(env.env, async () => {
-      await seedSkill(env.sourceDir, 'alpha');
+      await seedSkill(env, 'alpha');
       const targetBase = join(env.home, '.claude', 'skills');
       await Deno.mkdir(targetBase, { recursive: true });
 
@@ -100,7 +113,7 @@ Deno.test('syncSkill symlink: creates a valid symlink to absolute source', async
   const env = await setupIsolatedEnv({ sync_method: 'symlink' });
   try {
     await withEnv(env.env, async () => {
-      await seedSkill(env.sourceDir, 'beta');
+      await seedSkill(env, 'beta');
       await Deno.mkdir(join(env.home, '.claude', 'skills'), { recursive: true });
 
       const results = await syncSkill('beta');
@@ -122,10 +135,10 @@ Deno.test('syncAll hits every active skill and skips _deactivated', async () => 
   const env = await setupIsolatedEnv();
   try {
     await withEnv(env.env, async () => {
-      await seedSkill(env.sourceDir, 'alpha');
-      await seedSkill(env.sourceDir, 'beta');
+      await seedSkill(env, 'alpha');
+      await seedSkill(env, 'beta');
       // Put a dir under _deactivated — syncAll must ignore it.
-      await seedSkill(join(env.sourceDir, '_deactivated'), 'legacy');
+      await seedDeactivatedSkill(env, 'legacy');
       await Deno.mkdir(join(env.home, '.claude', 'skills'), { recursive: true });
 
       const results = await syncAll();
@@ -153,7 +166,7 @@ Deno.test('targets filter limits which named targets receive the skill', async (
         },
       });
       await Deno.mkdir(join(env.home, '.claude', 'skills'), { recursive: true });
-      await seedSkill(env.sourceDir, 'alpha');
+      await seedSkill(env, 'alpha');
 
       const results = await syncSkill('alpha', { agents: ['claude'] });
       assertEquals(results.length, 1);
@@ -170,7 +183,7 @@ Deno.test('per-skill sync_method override wins over global', async () => {
   const env = await setupIsolatedEnv(); // global = copy
   try {
     await withEnv(env.env, async () => {
-      await seedSkill(env.sourceDir, 'alpha');
+      await seedSkill(env, 'alpha');
       await Deno.mkdir(join(env.home, '.claude', 'skills'), { recursive: true });
       await patchConfig(env.configPath, {
         skills: { source: env.sourceDir },
@@ -194,7 +207,7 @@ Deno.test('CLI --method override beats per-skill and global', async () => {
   const env = await setupIsolatedEnv({ sync_method: 'symlink' });
   try {
     await withEnv(env.env, async () => {
-      await seedSkill(env.sourceDir, 'alpha');
+      await seedSkill(env, 'alpha');
       await Deno.mkdir(join(env.home, '.claude', 'skills'), { recursive: true });
       await patchConfig(env.configPath, {
         skill_overrides: { alpha: { sync_method: 'symlink' } },
@@ -214,7 +227,7 @@ Deno.test('dryRun makes no changes', async () => {
   const env = await setupIsolatedEnv();
   try {
     await withEnv(env.env, async () => {
-      await seedSkill(env.sourceDir, 'alpha');
+      await seedSkill(env, 'alpha');
       await Deno.mkdir(join(env.home, '.claude', 'skills'), { recursive: true });
 
       const results = await syncSkill('alpha', { dryRun: true });
@@ -239,7 +252,7 @@ Deno.test('missing target parent: skip with warning', async () => {
           claude: { skills: '/nonexistent-parent-xyz/deep/skills', rules: '/nonexistent-parent-xyz/deep/rules' },
         },
       });
-      await seedSkill(env.sourceDir, 'alpha');
+      await seedSkill(env, 'alpha');
 
       const results = await syncSkill('alpha');
       assertEquals(results.length, 1);
@@ -269,7 +282,7 @@ Deno.test('unsyncSkill removes the skill from every target', async () => {
   const env = await setupIsolatedEnv();
   try {
     await withEnv(env.env, async () => {
-      await seedSkill(env.sourceDir, 'alpha');
+      await seedSkill(env, 'alpha');
       await Deno.mkdir(join(env.home, '.claude', 'skills'), { recursive: true });
       await syncSkill('alpha');
       assert(await exists(join(env.home, '.claude', 'skills', 'alpha')));
@@ -288,7 +301,7 @@ Deno.test('--targets validates against known names', async () => {
   const env = await setupIsolatedEnv();
   try {
     await withEnv(env.env, async () => {
-      await seedSkill(env.sourceDir, 'alpha');
+      await seedSkill(env, 'alpha');
       const results = await syncSkill('alpha', { agents: ['bogus'] });
       assertEquals(results.length, 1);
       assertEquals(results[0].action, 'failed');
@@ -317,7 +330,7 @@ Deno.test('status fresh: target matches source, no local edits', async () => {
   const env = await setupIsolatedEnv();
   try {
     await withEnv(env.env, async () => {
-      await seedSkill(env.sourceDir, 'alpha');
+      await seedSkill(env, 'alpha');
       await Deno.mkdir(join(env.home, '.claude', 'skills'), { recursive: true });
       await syncSkill('alpha');
 
@@ -344,7 +357,7 @@ Deno.test('status stale: source newer than target (needs sync)', async () => {
   const env = await setupIsolatedEnv();
   try {
     await withEnv(env.env, async () => {
-      await seedSkill(env.sourceDir, 'alpha');
+      await seedSkill(env, 'alpha');
       await Deno.mkdir(join(env.home, '.claude', 'skills'), { recursive: true });
       await syncSkill('alpha');
 
@@ -379,7 +392,7 @@ Deno.test('status diverged: source edited since last pull', async () => {
   const env = await setupIsolatedEnv();
   try {
     await withEnv(env.env, async () => {
-      await seedSkill(env.sourceDir, 'alpha');
+      await seedSkill(env, 'alpha');
       await Deno.mkdir(join(env.home, '.claude', 'skills'), { recursive: true });
       await syncSkill('alpha');
 
@@ -414,7 +427,7 @@ Deno.test('status stale + diverged: source edited and not re-synced to target', 
   const env = await setupIsolatedEnv();
   try {
     await withEnv(env.env, async () => {
-      await seedSkill(env.sourceDir, 'alpha');
+      await seedSkill(env, 'alpha');
       await Deno.mkdir(join(env.home, '.claude', 'skills'), { recursive: true });
       await syncSkill('alpha');
 
@@ -448,7 +461,7 @@ Deno.test('status untracked: no synced_at means never stale or diverged', async 
   const env = await setupIsolatedEnv();
   try {
     await withEnv(env.env, async () => {
-      await seedSkill(env.sourceDir, 'alpha');
+      await seedSkill(env, 'alpha');
       await Deno.mkdir(join(env.home, '.claude', 'skills'), { recursive: true });
       await syncSkill('alpha');
 
@@ -468,7 +481,7 @@ Deno.test('per-skill agents allowlist restricts which agents receive the skill (
   const env = await setupIsolatedEnv();
   try {
     await withEnv(env.env, async () => {
-      await seedSkill(env.sourceDir, 'alpha');
+      await seedSkill(env, 'alpha');
       const claudeSkills = join(env.home, '.claude', 'skills');
       const otherSkills = join(env.home, '.other', 'skills');
       await Deno.mkdir(claudeSkills, { recursive: true });
@@ -500,7 +513,7 @@ Deno.test('status symlink: never stale or diverged', async () => {
   const env = await setupIsolatedEnv({ sync_method: 'symlink' });
   try {
     await withEnv(env.env, async () => {
-      await seedSkill(env.sourceDir, 'alpha');
+      await seedSkill(env, 'alpha');
       await Deno.mkdir(join(env.home, '.claude', 'skills'), { recursive: true });
       await syncSkill('alpha');
 

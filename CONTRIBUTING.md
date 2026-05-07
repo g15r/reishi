@@ -78,6 +78,51 @@ repro, a missing flag with a clear shape, a doc inaccuracy. An issue should desc
 
 We auto-close issues and PRs that don't engage with these guidelines. That's care for the OSS ecosystem, not gatekeeping — please reopen after addressing the feedback. The bot will point you at the section that needs work.
 
+## Writing tests
+
+Tests run offline against `REISHI_CONFIG`-redirected temp dirs. Two layers do the work:
+
+- **`setupIsolatedEnv()`** in `test-helpers.ts` builds an isolated `HOME` + config + source dirs and returns an `IsolatedEnv` with a `cleanup()` that wipes everything when the test finishes.
+- **The `seed*` builders** populate that env with structured input — no inline `Deno.makeTempDir` + `writeTextFile` chains. Reach for one of these before hand-rolling scaffolding:
+  - `seedSourceDir(env, { skills, rules, docs })` — populate the source side.
+  - `seedAgentTarget(env, { name?, skills, rules })` — populate an agent target dir.
+  - `seedProject(env, { name?, files, dirs })` — build a project-root layout under `env.home`.
+  - `seedRemoteRepo(env, { fixtureName? | files, skills })` — produce a GitHub-shaped tarball you feed to `fakeFetchGithub()`.
+  - `copyFixtureToTemp(env, ...parts)` — mutable copy of any on-disk fixture.
+
+Skeleton:
+
+```ts
+import { seedSourceDir, setupIsolatedEnv } from './test-helpers.ts';
+
+Deno.test('listRules: returns top-level entries', async () => {
+  const env = await setupIsolatedEnv();
+  try {
+    await withEnv(env.env, async () => {
+      await seedSourceDir(env, { rules: { 'no-deletes.md': '# rule\n' } });
+      const names = await getRuleNames();
+      assertEquals(names, ['no-deletes']);
+    });
+  } finally {
+    await env.cleanup();
+  }
+});
+```
+
+### Fixtures
+
+`test-fixtures/` is split into three buckets — see [`test-fixtures/README.md`](./test-fixtures/README.md) for the contract:
+
+- `remote-repos/` — GitHub-tarball sources for `add` / `pull` tests.
+- `project-targets/` — heterogeneous project-root layouts simulating real user repos.
+- `project-sources/` — curated reishi-source dirs (skills + rules + docs).
+
+A fixture file that no `*_test.ts` references gets deleted (dev-R003). Don't add fixtures speculatively; add them when a test needs them.
+
+### Assertions
+
+For compile/sync output, prefer `assertCompiledIndexMatches(actual, expectations)` over chained `assertStringIncludes` — keeps the intent in one place.
+
 ## Design principles and anti-goals
 
 Reishi's design is opinionated. A few load-bearing principles to know before you propose a feature:

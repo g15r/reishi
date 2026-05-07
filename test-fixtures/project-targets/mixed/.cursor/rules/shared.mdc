@@ -1,0 +1,5 @@
+---
+description: Cursor-side rule that overlaps the claude-side skill in the mixed fixture.
+---
+
+Keep prompts terse; defer to the SKILL when present.

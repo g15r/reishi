@@ -1,0 +1,4 @@
+# Cursor rules
+
+Top-level cursor configuration. Fixture for the cursor-only project layout —
+exists so the docs-import scoop scanner sees a real cursor footprint.

@@ -17,7 +17,7 @@ import {
 import { moveSkill, removeSkill } from './sync.ts';
 import { moveRule, removeRule, stripMdSuffix } from './rules.ts';
 import { moveFragment, removeFragment } from './docs.ts';
-import { setupIsolatedEnv } from './test-helpers.ts';
+import { seedSourceDir, setupIsolatedEnv } from './test-helpers.ts';
 
 async function withEnv(
   env: Record<string, string>,
@@ -69,9 +69,7 @@ Deno.test('moveRule: renames .md file in source', async () => {
   const env = await setupIsolatedEnv();
   try {
     await withEnv(env.env, async () => {
-      const rulesDir = join(env.home, '.config', 'reishi', 'rules');
-      await Deno.mkdir(rulesDir, { recursive: true });
-      await Deno.writeTextFile(join(rulesDir, 'old.md'), '# old\n');
+      const { rulesDir } = await seedSourceDir(env, { rules: { 'old.md': '# old\n' } });
 
       const result = await moveRule('old', 'new');
       assertEquals(result.fromPath, join(rulesDir, 'old.md'));
@@ -88,9 +86,7 @@ Deno.test('moveRule: accepts .md suffix on either argument', async () => {
   const env = await setupIsolatedEnv();
   try {
     await withEnv(env.env, async () => {
-      const rulesDir = join(env.home, '.config', 'reishi', 'rules');
-      await Deno.mkdir(rulesDir, { recursive: true });
-      await Deno.writeTextFile(join(rulesDir, 'foo.md'), 'x');
+      const { rulesDir } = await seedSourceDir(env, { rules: { 'foo.md': 'x' } });
 
       await moveRule('foo.md', 'bar.md');
       assert(await exists(join(rulesDir, 'bar.md')));
@@ -104,8 +100,7 @@ Deno.test('moveRule: refuses missing source', async () => {
   const env = await setupIsolatedEnv();
   try {
     await withEnv(env.env, async () => {
-      const rulesDir = join(env.home, '.config', 'reishi', 'rules');
-      await Deno.mkdir(rulesDir, { recursive: true });
+      await seedSourceDir(env, { rules: {} });
       await assertRejects(() => moveRule('absent', 'new'), Error, 'rule not found');
     });
   } finally {
@@ -117,10 +112,7 @@ Deno.test('moveRule: refuses to overwrite existing destination', async () => {
   const env = await setupIsolatedEnv();
   try {
     await withEnv(env.env, async () => {
-      const rulesDir = join(env.home, '.config', 'reishi', 'rules');
-      await Deno.mkdir(rulesDir, { recursive: true });
-      await Deno.writeTextFile(join(rulesDir, 'a.md'), 'a');
-      await Deno.writeTextFile(join(rulesDir, 'b.md'), 'b');
+      await seedSourceDir(env, { rules: { 'a.md': 'a', 'b.md': 'b' } });
       await assertRejects(() => moveRule('a', 'b'), Error, 'destination already exists');
     });
   } finally {
@@ -132,9 +124,7 @@ Deno.test('removeRule: deletes source .md', async () => {
   const env = await setupIsolatedEnv();
   try {
     await withEnv(env.env, async () => {
-      const rulesDir = join(env.home, '.config', 'reishi', 'rules');
-      await Deno.mkdir(rulesDir, { recursive: true });
-      await Deno.writeTextFile(join(rulesDir, 'gone.md'), 'x');
+      const { rulesDir } = await seedSourceDir(env, { rules: { 'gone.md': 'x' } });
 
       const result = await removeRule('gone.md');
       assertEquals(result.removedPath, join(rulesDir, 'gone.md'));
@@ -149,8 +139,7 @@ Deno.test('removeRule: refuses missing source', async () => {
   const env = await setupIsolatedEnv();
   try {
     await withEnv(env.env, async () => {
-      const rulesDir = join(env.home, '.config', 'reishi', 'rules');
-      await Deno.mkdir(rulesDir, { recursive: true });
+      await seedSourceDir(env, { rules: {} });
       await assertRejects(() => removeRule('absent'), Error, 'rule not found');
     });
   } finally {
@@ -166,9 +155,8 @@ Deno.test('moveFragment: renames file under project dir', async () => {
   const env = await setupIsolatedEnv();
   try {
     await withEnv(env.env, async () => {
+      await seedSourceDir(env, { docs: { p: { 'old.md': '# old' } } });
       const projDir = join(env.docsDir, 'p');
-      await Deno.mkdir(projDir, { recursive: true });
-      await Deno.writeTextFile(join(projDir, 'old.md'), '# old');
 
       const result = await moveFragment('p', 'old', 'new');
       assertEquals(result.toPath, join(projDir, 'new.md'));
@@ -185,10 +173,7 @@ Deno.test('moveFragment: rewrites [projects.*].fragments when present', async ()
   const env = await setupIsolatedEnv();
   try {
     await withEnv(env.env, async () => {
-      const projDir = join(env.docsDir, 'p');
-      await Deno.mkdir(projDir, { recursive: true });
-      await Deno.writeTextFile(join(projDir, 'old.md'), 'x');
-      await Deno.writeTextFile(join(projDir, 'keep.md'), 'y');
+      await seedSourceDir(env, { docs: { p: { 'old.md': 'x', 'keep.md': 'y' } } });
       await patchConfig(env.configPath, {
         projects: {
           p: { path: '~/code/p', fragments: ['old.md', 'keep.md'] },
@@ -224,9 +209,8 @@ Deno.test('removeFragment: deletes file and prunes fragments array', async () =>
   const env = await setupIsolatedEnv();
   try {
     await withEnv(env.env, async () => {
+      await seedSourceDir(env, { docs: { p: { 'gone.md': 'x' } } });
       const projDir = join(env.docsDir, 'p');
-      await Deno.mkdir(projDir, { recursive: true });
-      await Deno.writeTextFile(join(projDir, 'gone.md'), 'x');
       await Deno.writeTextFile(join(projDir, 'keep.md'), 'y');
       await patchConfig(env.configPath, {
         projects: {
@@ -249,20 +233,17 @@ Deno.test('removeFragment: deletes file and prunes fragments array', async () =>
 // Skills
 // ---------------------------------------------------------------------------
 
-async function seedSkill(sourceDir: string, name: string): Promise<void> {
-  const dir = join(sourceDir, name);
-  await Deno.mkdir(dir, { recursive: true });
-  await Deno.writeTextFile(
-    join(dir, 'SKILL.md'),
-    `---\nname: ${name}\ndescription: x\n---\n`,
-  );
+async function seedSkill(env: Awaited<ReturnType<typeof setupIsolatedEnv>>, name: string): Promise<void> {
+  await seedSourceDir(env, {
+    skills: { [name]: { 'SKILL.md': `---\nname: ${name}\ndescription: x\n---\n` } },
+  });
 }
 
 Deno.test('moveSkill: renames source dir', async () => {
   const env = await setupIsolatedEnv();
   try {
     await withEnv(env.env, async () => {
-      await seedSkill(env.sourceDir, 'foo');
+      await seedSkill(env, 'foo');
       const result = await moveSkill('foo', 'bar');
       assertEquals(result.fromPath, join(env.sourceDir, 'foo'));
       assertEquals(result.toPath, join(env.sourceDir, 'bar'));
@@ -278,7 +259,7 @@ Deno.test('moveSkill: rekeys lockfile entry', async () => {
   const env = await setupIsolatedEnv();
   try {
     await withEnv(env.env, async () => {
-      await seedSkill(env.sourceDir, 'foo');
+      await seedSkill(env, 'foo');
       await saveLockfile({
         skills: {
           foo: {
@@ -306,7 +287,7 @@ Deno.test('moveSkill: rekeys [skill_overrides.<name>] when present', async () =>
   const env = await setupIsolatedEnv();
   try {
     await withEnv(env.env, async () => {
-      await seedSkill(env.sourceDir, 'foo');
+      await seedSkill(env, 'foo');
       const cfg = await loadConfig();
       cfg.skill_overrides = { foo: { sync_method: 'symlink' } };
       await saveConfig(cfg);
@@ -327,8 +308,8 @@ Deno.test('moveSkill: refuses missing source and existing destination', async ()
   try {
     await withEnv(env.env, async () => {
       await assertRejects(() => moveSkill('absent', 'new'), Error, 'skill not found');
-      await seedSkill(env.sourceDir, 'a');
-      await seedSkill(env.sourceDir, 'b');
+      await seedSkill(env, 'a');
+      await seedSkill(env, 'b');
       await assertRejects(() => moveSkill('a', 'b'), Error, 'destination already exists');
     });
   } finally {
@@ -340,7 +321,7 @@ Deno.test('removeSkill: deletes source dir, lockfile entry, skill_overrides', as
   const env = await setupIsolatedEnv();
   try {
     await withEnv(env.env, async () => {
-      await seedSkill(env.sourceDir, 'foo');
+      await seedSkill(env, 'foo');
       await saveLockfile({
         skills: {
           foo: {
@@ -373,7 +354,7 @@ Deno.test('removeSkill: untracked skill removes only the dir', async () => {
   const env = await setupIsolatedEnv();
   try {
     await withEnv(env.env, async () => {
-      await seedSkill(env.sourceDir, 'foo');
+      await seedSkill(env, 'foo');
       const result = await removeSkill('foo');
       assertEquals(result.removedFromLockfile, false);
       assertEquals(result.removedFromSkillOverrides, false);

@@ -13,7 +13,7 @@ import { resetPathCache } from './paths.ts';
 import { pullSkill, syncSkill } from './sync.ts';
 import {
   fakeFetchGithub,
-  makeFixtureTarball,
+  seedRemoteRepo,
   setupIsolatedEnv,
 } from './test-helpers.ts';
 
@@ -65,7 +65,7 @@ async function seedSkill(sourceDir: string, name: string): Promise<string> {
 
 Deno.test('prefix change (rename): renames source, target, and re-keys config', async () => {
   const env = await setupIsolatedEnv();
-  const tarball = await makeFixtureTarball('multi-skill-repo');
+  const tarball = await seedRemoteRepo(env, { fixtureName: 'multi-skill-repo' });
   try {
     await withEnv(env.env, async () => {
       const oldName = 'readwiseio_book-review';
@@ -118,16 +118,13 @@ Deno.test('prefix change (rename): renames source, target, and re-keys config', 
       assert(result.sync.some((r) => r.skillName === newName));
     });
   } finally {
-    try {
-      await Deno.remove(tarball);
-    } catch { /* ignore */ }
     await env.cleanup();
   }
 });
 
 Deno.test('prefix change (parallel): creates new-named entry alongside old', async () => {
   const env = await setupIsolatedEnv();
-  const tarball = await makeFixtureTarball('multi-skill-repo');
+  const tarball = await seedRemoteRepo(env, { fixtureName: 'multi-skill-repo' });
   try {
     await withEnv(env.env, async () => {
       const oldName = 'readwiseio_book-review';
@@ -176,9 +173,6 @@ Deno.test('prefix change (parallel): creates new-named entry alongside old', asy
       assertEquals(cfg.skills[newName].prefix, 'readwise');
     });
   } finally {
-    try {
-      await Deno.remove(tarball);
-    } catch { /* ignore */ }
     await env.cleanup();
   }
 });
@@ -220,7 +214,7 @@ Deno.test('prefix change (abort): exits with informative reason, no writes', asy
 
 Deno.test('prefix change (dry-run): previews rename without writing', async () => {
   const env = await setupIsolatedEnv();
-  const tarball = await makeFixtureTarball('multi-skill-repo');
+  const tarball = await seedRemoteRepo(env, { fixtureName: 'multi-skill-repo' });
   try {
     await withEnv(env.env, async () => {
       const oldName = 'readwiseio_book-review';
@@ -252,16 +246,13 @@ Deno.test('prefix change (dry-run): previews rename without writing', async () =
       assert(!cfg.skills['readwise_book-review']);
     });
   } finally {
-    try {
-      await Deno.remove(tarball);
-    } catch { /* ignore */ }
     await env.cleanup();
   }
 });
 
 Deno.test('prefix change (prompt confirms rename): renames via injected prompt', async () => {
   const env = await setupIsolatedEnv();
-  const tarball = await makeFixtureTarball('multi-skill-repo');
+  const tarball = await seedRemoteRepo(env, { fixtureName: 'multi-skill-repo' });
   try {
     await withEnv(env.env, async () => {
       const oldName = 'readwiseio_book-review';
@@ -301,16 +292,13 @@ Deno.test('prefix change (prompt confirms rename): renames via injected prompt',
       assert(result.sync.some((r) => r.skillName === newName));
     });
   } finally {
-    try {
-      await Deno.remove(tarball);
-    } catch { /* ignore */ }
     await env.cleanup();
   }
 });
 
 Deno.test('prefix change (prompt confirms parallel): installs alongside via injected prompt', async () => {
   const env = await setupIsolatedEnv();
-  const tarball = await makeFixtureTarball('multi-skill-repo');
+  const tarball = await seedRemoteRepo(env, { fixtureName: 'multi-skill-repo' });
   try {
     await withEnv(env.env, async () => {
       const oldName = 'readwiseio_book-review';
@@ -352,9 +340,6 @@ Deno.test('prefix change (prompt confirms parallel): installs alongside via inje
       assert(cfg.skills[newName], 'new config entry exists');
     });
   } finally {
-    try {
-      await Deno.remove(tarball);
-    } catch { /* ignore */ }
     await env.cleanup();
   }
 });
@@ -392,7 +377,7 @@ Deno.test('prefix change (prompt declines): aborts via injected prompt', async (
 
 Deno.test('prefix change (no change): no-op when prefix matches dir name', async () => {
   const env = await setupIsolatedEnv();
-  const tarball = await makeFixtureTarball('multi-skill-repo');
+  const tarball = await seedRemoteRepo(env, { fixtureName: 'multi-skill-repo' });
   try {
     await withEnv(env.env, async () => {
       const name = 'readwiseio_book-review';
@@ -426,9 +411,6 @@ Deno.test('prefix change (no change): no-op when prefix matches dir name', async
       assert(result.sync.some((r) => r.action === 'copied' || r.action === 'symlinked'));
     });
   } finally {
-    try {
-      await Deno.remove(tarball);
-    } catch { /* ignore */ }
     await env.cleanup();
   }
 });

@@ -1,5 +1,35 @@
 # Completed Work Log
 
+## Phase 20: Test-fixture reorg and `seed*` builders ✅
+**Requirements**: dev-R001, dev-R002, dev-R003, dev-R010, dev-R011, dev-R012, dev-R013, dev-R020, dev-R021, dev-R030
+
+Test scaffolding scaled past its original ad-hoc shape. Reorganised `test-fixtures/` into three purposeful buckets, added a structured `seed*` builder API on top of `setupIsolatedEnv`, and migrated the high-leverage test files off inline `Deno.makeTempDir` + `writeTextFile` chains. The full suite stays at the same 418/420 baseline (the two failures are the existing sandbox-related compile-binary fetch).
+
+### Fixture buckets
+
+- [x] Renamed `test-fixtures/repos/` → `test-fixtures/remote-repos/`
+- [x] Added `test-fixtures/project-targets/` with six layouts: `claude-only`, `cursor-only`, `mixed`, `agents-only`, `deeply-nested`, `none-detected`
+- [x] Added `test-fixtures/project-sources/rules-with-tree/` as the first curated source dir
+- [x] Wrote `test-fixtures/README.md` describing the three-bucket contract
+- [x] Deleted unreferenced fixtures (`docs-repo`, `rules-repo`, `docs/`, `rules/`)
+
+### Builders in `test-helpers.ts`
+
+- [x] `IsolatedEnv` gained a `rulesDir` field and a `registerCleanup` hook so builders can stage temp dirs outside `home` and still be swept by `env.cleanup()`
+- [x] `seedSourceDir(env, { skills, rules, docs })`, `seedAgentTarget(env, { name?, skills, rules })`, `seedProject(env, { files, dirs })`, `seedRemoteRepo(env, { fixtureName? | files, skills })`, `copyFixtureToTemp(env, ...parts)` — each TSDoc'd with inputs, outputs, cleanup contract
+- [x] `assertCompiledIndexMatches(actual, { title, containsAll, excludes, fragments })` consolidates compile/sync output assertions
+- [x] Retired the legacy `makeFixtureTarball` export in favour of `seedRemoteRepo`
+
+### Test migrations
+
+- [x] Migrated `rules_test.ts`, `sync_test.ts`, `sync_integration_test.ts`, `sync_fetch_test.ts`, `sync_prefix_test.ts`, `add_test.ts`, `docs_test.ts`, `compile_phase14_test.ts`, `move_remove_test.ts` off inline scaffolding
+  - Inline `makeTempDir` + `writeTextFile` calls in those files dropped from ~50 to ~20, mostly remaining only inside `patchConfig` / `writeLockfile` helpers
+  - `cli_test.ts` left as-is — it builds per-test temp dirs without `setupIsolatedEnv`, so a builder swap would be a deeper refactor outside Phase 20's scope
+
+### Developer docs
+
+- [x] Added a "Writing tests" section to `CONTRIBUTING.md` documenting the builder pattern, the fixture vocabulary, and the `assertCompiledIndexMatches` helper, with a skeleton test as the on-ramp
+
 ## Phase 15: `clean_on_sync` orphan cleanup ✅
 **Requirements**: sy-R070, sy-R071, sy-R072, sy-R073, sy-R074
 

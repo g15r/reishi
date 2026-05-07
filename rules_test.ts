@@ -9,7 +9,7 @@ import { exists } from '@std/fs';
 import { parse as parseTOML, stringify as stringifyTOML } from '@std/toml';
 import { resetPathCache } from './paths.ts';
 import { getRuleNames, listRules, syncRules } from './rules.ts';
-import { setupIsolatedEnv } from './test-helpers.ts';
+import { seedSourceDir, setupIsolatedEnv } from './test-helpers.ts';
 
 async function withEnv(
   env: Record<string, string>,
@@ -42,24 +42,22 @@ async function patchConfig(
   await Deno.writeTextFile(configPath, stringifyTOML(next));
 }
 
-async function seedRulesSource(rulesDir: string): Promise<void> {
-  await Deno.mkdir(rulesDir, { recursive: true });
-  await Deno.writeTextFile(join(rulesDir, 'no-deletes.md'), '# No Deletes\n');
-  await Deno.mkdir(join(rulesDir, 'security'), { recursive: true });
-  await Deno.writeTextFile(
-    join(rulesDir, 'security', 'policies.md'),
-    '# Security\n',
-  );
-  // A dotfile that listRules must ignore.
-  await Deno.writeTextFile(join(rulesDir, '.hidden'), 'ignored');
+async function seedRulesFor(env: Awaited<ReturnType<typeof setupIsolatedEnv>>): Promise<string> {
+  const { rulesDir } = await seedSourceDir(env, {
+    rules: {
+      'no-deletes.md': '# No Deletes\n',
+      'security/policies.md': '# Security\n',
+      '.hidden': 'ignored',
+    },
+  });
+  return rulesDir;
 }
 
 Deno.test('listRules: handles files, directories, ignores dotfiles', async () => {
   const env = await setupIsolatedEnv();
   try {
     await withEnv(env.env, async () => {
-      const rulesDir = join(env.home, '.config', 'reishi', 'rules');
-      await seedRulesSource(rulesDir);
+      await seedRulesFor(env);
 
       const rules = await listRules();
       assertEquals(rules.length, 2);
@@ -77,8 +75,7 @@ Deno.test('syncRules: copy mode creates independent files', async () => {
   try {
     await withEnv(env.env, async () => {
       await Deno.mkdir(join(env.home, '.claude'), { recursive: true });
-      const rulesDir = join(env.home, '.config', 'reishi', 'rules');
-      await seedRulesSource(rulesDir);
+      const rulesDir = await seedRulesFor(env);
 
       const results = await syncRules();
       assert(results.length > 0);
@@ -101,8 +98,7 @@ Deno.test('syncRules: symlink mode links back to absolute source', async () => {
   try {
     await withEnv(env.env, async () => {
       await Deno.mkdir(join(env.home, '.claude'), { recursive: true });
-      const rulesDir = join(env.home, '.config', 'reishi', 'rules');
-      await seedRulesSource(rulesDir);
+      await seedRulesFor(env);
       await patchConfig(env.configPath, { sync_method: 'symlink' });
       resetPathCache();
 
@@ -123,8 +119,7 @@ Deno.test('syncRules: rules.sync_method override wins over global', async () => 
   try {
     await withEnv(env.env, async () => {
       await Deno.mkdir(join(env.home, '.claude'), { recursive: true });
-      const rulesDir = join(env.home, '.config', 'reishi', 'rules');
-      await seedRulesSource(rulesDir);
+      const rulesDir = await seedRulesFor(env);
       await patchConfig(env.configPath, {
         rules: {
           source: rulesDir,
@@ -152,8 +147,7 @@ Deno.test('syncRules: CLI --method override beats rules.sync_method', async () =
   try {
     await withEnv(env.env, async () => {
       await Deno.mkdir(join(env.home, '.claude'), { recursive: true });
-      const rulesDir = join(env.home, '.config', 'reishi', 'rules');
-      await seedRulesSource(rulesDir);
+      const rulesDir = await seedRulesFor(env);
       await patchConfig(env.configPath, {
         rules: {
           source: rulesDir,
@@ -182,8 +176,7 @@ Deno.test('syncRules: targets filter restricts to named targets', async () => {
     await withEnv(env.env, async () => {
       await Deno.mkdir(join(env.home, '.claude'), { recursive: true });
       await Deno.mkdir(join(env.home, '.agents'), { recursive: true });
-      const rulesDir = join(env.home, '.config', 'reishi', 'rules');
-      await seedRulesSource(rulesDir);
+      const rulesDir = await seedRulesFor(env);
       await patchConfig(env.configPath, {
         rules: {
           source: rulesDir,
@@ -217,8 +210,7 @@ Deno.test('syncRules: dry-run makes no writes', async () => {
   try {
     await withEnv(env.env, async () => {
       await Deno.mkdir(join(env.home, '.claude'), { recursive: true });
-      const rulesDir = join(env.home, '.config', 'reishi', 'rules');
-      await seedRulesSource(rulesDir);
+      await seedRulesFor(env);
 
       const results = await syncRules({ dryRun: true });
       assert(results.every((r) => r.reason === 'dry run'));
@@ -235,8 +227,7 @@ Deno.test('syncRules: missing target parent warns and skips', async () => {
     await withEnv(env.env, async () => {
       // Do NOT create .claude/ — its parent is env.home (which exists) but
       // the target is .claude/rules, whose parent is .claude — missing.
-      const rulesDir = join(env.home, '.config', 'reishi', 'rules');
-      await seedRulesSource(rulesDir);
+      await seedRulesFor(env);
 
       const results = await syncRules();
       assert(results.every((r) => r.action === 'skipped'));
@@ -251,8 +242,7 @@ Deno.test('getRuleNames: returns basename list for tab completion', async () => 
   const env = await setupIsolatedEnv();
   try {
     await withEnv(env.env, async () => {
-      const rulesDir = join(env.home, '.config', 'reishi', 'rules');
-      await seedRulesSource(rulesDir);
+      await seedRulesFor(env);
       const names = await getRuleNames();
       assertEquals(names.sort(), ['no-deletes', 'security']);
     });

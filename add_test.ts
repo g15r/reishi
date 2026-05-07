@@ -16,7 +16,7 @@ import type { ConfigSchema, LockfileSchema } from './config.ts';
 import {
   fakeFetchGithub,
   type IsolatedEnv,
-  makeFixtureTarball,
+  seedRemoteRepo,
   setupIsolatedEnv,
 } from './test-helpers.ts';
 
@@ -65,14 +65,11 @@ async function withFixture(
   }) => Promise<void>,
 ): Promise<void> {
   const env = await setupIsolatedEnv(envOverrides);
-  const tarballPath = await makeFixtureTarball(fixtureRepoName);
+  const tarballPath = await seedRemoteRepo(env, { fixtureName: fixtureRepoName });
   const fetcher = fakeFetchGithub(tarballPath);
   try {
     await withEnv(env.env, () => fn({ env, fetcher }));
   } finally {
-    try {
-      await Deno.remove(tarballPath);
-    } catch { /* ignore */ }
     await env.cleanup();
   }
 }
