@@ -27,6 +27,7 @@ Canonical terms — keep these consistent across CLI output, errors, docs, and t
 - @specs/dc-docs.md
 - @specs/sy-sync.md
 - @specs/dev-testing.md
+- @specs/dev-ci.md
 
 ## Requirements
 

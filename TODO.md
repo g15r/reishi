@@ -1,7 +1,7 @@
 # reishi TODO
 
 ## Phase 16: Compiled index core fragment
-**Requirements**: dc-R090, dc-R091, dc-R092, dc-R093, dc-R094, dc-R095, dc-R096, cf-R011
+**Requirements**: dc-R090, dc-R091, dc-R092, dc-R093, dc-R094, dc-R095, dc-R096, cf-R011, dev-R070
 
 ### Compiler core-fragment detection and emission
 - [ ] Detect filename match against `[docs].index_filename` (case-insensitive) when reading project fragments
@@ -23,6 +23,7 @@
 - [ ] Unit: case-insensitive match, collision error, no-core fallback, frontmatter stripped
 - [ ] Unit: token-budget trims links only, core always full
 - [ ] Unit: warn fires above threshold, silent at and below
+- [ ] Snapshot (`@std/testing/snapshot`): compiled-index full output for {core-only, links-only, both, token-trimmed} fixtures — substring assertions remain only for one-line invariants
 
 ## Phase 17: Target overwrite protection
 **Requirements**: dc-R100, dc-R101, dc-R102, dc-R103, dc-R104
@@ -92,3 +93,33 @@ Scaffold today drops four files into a new skill (`SKILL.md`, `example-reference
 - [ ] Add a case asserting no `scripts/` or `assets/` dir is created
 - [ ] Confirm `rei skills validate` still passes against the new minimal scaffold
 
+## Phase 21: Test harness solidification
+**Requirements**: dev-R040, dev-R041, dev-R050, dev-R060, dev-R061, dev-R062
+
+Phase 20 reorganised fixtures and added the `seed*` builders. Phase 21 finishes the harness story: pulls the duplicated per-file helpers into `test-helpers.ts`, finally migrates `cli_test.ts` (the largest remaining inline-scaffolding pocket), and lands the quality-of-life pieces — fake clock, URL-aware fetch fake, permissions-drift assertion.
+
+### Centralize duplicated helpers
+- [ ] Promote `withEnv`, `patchConfig`, `writeLockfile` from per-test files into `test-helpers.ts`; delete the per-file copies
+- [ ] Add `runCli(env, args)` to `test-helpers.ts` — accepts an `IsolatedEnv`, inherits `PATH` / `DENO_DIR` / `XDG_CACHE_HOME` / `USER`, returns `{ code, stdout, stderr }`
+- [ ] Replace per-file `runCli` reinventions (`sync_integration_test.ts`, `cli_test.ts`, etc.) with the shared helper
+
+### Migrate `cli_test.ts`
+- [ ] Convert per-test `Deno.makeTempDir` shapes to `setupIsolatedEnv` + the `seed*` builders, file section by file section, suite green at every step
+- [ ] Drop the now-unused per-file scaffolding; idiosyncratic per-test shapes that don't fit a builder stay inline (mirrors dev-R021)
+
+### Quality-of-life upgrades
+- [ ] Refactor `sync.ts` (and any other module that calls `Date.now()` directly) to consume an injectable clock so a fake-now helper has somewhere to plug in
+- [ ] Add `withFakeNow(env, fn)` to `test-helpers.ts`; replace `setTimeout`-based waits in `sync_fetch_test.ts` and elsewhere with deterministic time steps
+- [ ] Replace or extend `fakeFetchGithub` with a URL-aware fake that distinguishes commits API, tarball download, and ref-resolution endpoints; assert expected endpoints in tests so wrong-endpoint regressions surface
+- [ ] Add a permissions-drift test that asserts the compiled binary is invoked with the narrow `--allow-*` set R008 specifies; failures block the suite
+
+## Phase 22: CI coverage signal
+**Dependencies**: 21
+**Requirements**: dev-R100, dev-R101
+
+Re-examine CI now that the test harness is in better shape. Phase 21's helpers and migrations make the suite uniform enough that coverage numbers are meaningful — wire them into PR review.
+
+### Coverage in CI
+- [ ] Add `deno test --coverage` to the GitHub Actions workflow; emit the `coverage` profile as a workflow artifact
+- [ ] Surface line and branch coverage on PRs (PR comment or status check) with deltas relative to the merge base
+- [ ] Establish a baseline floor; PRs that drop below it fail the gate. Floor is bumped by maintainer decision, not auto-ratcheted
