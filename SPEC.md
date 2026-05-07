@@ -26,6 +26,7 @@ Canonical terms — keep these consistent across CLI output, errors, docs, and t
 - @specs/ru-rules.md
 - @specs/dc-docs.md
 - @specs/sy-sync.md
+- @specs/dev-testing.md
 
 ## Requirements
 
@@ -75,37 +76,3 @@ These are larger investments and probably wait until the tool migrates to Go or 
 - **TUI** — terminal UI for browsing and managing your library, launching `$EDITOR` and dropping back, doing bulk file operations.
 - **fzf integration** — fuzzy search across skills, rules, and docs; preview content or open in editor.
 - **Web UI** — local server for visual browsing and management; should mirror the TUI experience closely.
-
-## Meta
-
-Unscoped tooling and configuration tasks. Flat list — Planner and Manager both add. Cleared by request.
-
-### Test-suite reorg and expansion
-
-The project has scaled past what the original test scaffolding was designed for. `test-fixtures/` has unclear naming (project-source samples and remote-repo samples sit as sibling top-level dirs with similar names), and 14 of 17 `*_test.ts` files build state inline via `makeTempDir` + `writeTextFile`, leading to ~6k lines of test code with heavy duplicated scaffolding. Goal: a clear fixture vocabulary and named builder helpers so red-green TDD is the default for every Phase going forward, starting with Phase 16.
-
-Scope:
-
-- Reorganize `test-fixtures/` into purposeful top-level buckets:
-  - `remote-repos/` — current `repos/`, the GitHub-tarball fetch sources for `skills add` / `skills pull` tests.
-  - `project-targets/` — heterogeneous project-root layouts simulating real user repos (claude-only, cursor-only, mixed, AGENTS-only, deeply nested, none-detected). The foundation Phase 18 import work needs.
-  - `project-sources/` — curated reishi-source dirs (skills + rules + docs) used as compile/sync inputs.
-- Update `test-helpers.ts`:
-  - Rewrite `fixturesPath` callsites and TSDoc to match the new vocabulary.
-  - Add `copyFixtureToTemp(name)` so tests get isolated, mutable copies of on-disk fixtures.
-  - Extract the inline scaffolding patterns into named builders: `seedProject`, `seedAgentTarget`, `seedSourceDir`, `seedRemoteRepo`. Each takes a structured input (object), writes to a temp dir, and registers cleanup with the existing `setupIsolatedEnv` hook.
-  - Add a small `assertCompiledIndexMatches` (or equivalent) helper so compile/sync tests stop hand-rolling string comparisons.
-- Migrate inline scaffolding across the 14 affected `*_test.ts` files to use the builders. Mechanical, file-by-file. Tests must stay green at every step.
-- Add `test-fixtures/README.md` (the only doc-style README in `test-fixtures/`) explaining each top-level bucket — short, future-agent-readable.
-- Audit for and delete dead fixtures (anything no test references after migration).
-- Add a "writing tests" section to project developer docs describing the builder pattern and fixture vocabulary, so Phase 16+ subagents pick it up automatically.
-
-Acceptance:
-
-- Existing test suite stays green throughout (`deno task test` after each migration step).
-- `test-fixtures/` has a `README.md` and three clearly-named subdirs.
-- `test-helpers.ts` exports at least four `seed*` builders with TSDoc.
-- Inline `makeTempDir` + `writeTextFile` calls in `*_test.ts` drop meaningfully (readable wins matter more than exact line count).
-- Developer docs have a fixture/builder section reachable from the repo root README or `docs/`.
-
-This is Meta, not a Phase — it adds no behavior and has no requirement IDs. Runs sequentially before Phase 16 begins.

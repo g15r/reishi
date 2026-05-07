@@ -79,23 +79,30 @@ Future requirements, open questions, and big ideas. Not active work — promote 
 
 - [ ] Update `skills validate` to use linter/formatter semantics — `skills lint`, `skills lint --fix`. Combine deeper validation of skill spec rules with markdownlint-style markdown checks, and auto-fix where possible (table formatting, etc.). Consider extracting a `skillint` library that wraps markdownlint and adds agent-context-engineering rules. Lower-priority extension to rules and docs (pure markdown linting).
 
-### LLM-powered features
+### Tests
+- [ ] Update `cli_test.ts` and `compile_test.ts` cases that assert the four-file layout to assert single-file `SKILL.md` only
+- [ ] Add a case asserting no `scripts/` or `assets/` dir is created
+- [ ] Confirm `rei skills validate` still passes against the new minimal scaffold
 
-- [ ] `refine` commands across skills, docs, and rules — configurable, template-based LLM prompt to improve sources for more effective language and structure in fewer tokens.
-- [ ] `validate --audit` — semantic conflict detection: warn when two skills have overlapping tool permissions or trigger conditions.
+## Phase 20: Test-fixture reorg and `seed*` builders
+**Requirements**: dev-R001, dev-R002, dev-R003, dev-R010, dev-R011, dev-R012, dev-R013, dev-R020, dev-R021, dev-R030
 
-### `checkpoint` command
+### Fixture bucket reorg
+- [ ] Rename `test-fixtures/repos/` → `test-fixtures/remote-repos/` and update every callsite
+- [ ] Create `test-fixtures/project-targets/` and seed it with the heterogeneous project-root layouts (claude-only, cursor-only, mixed, AGENTS-only, deeply nested, none-detected)
+- [ ] Create `test-fixtures/project-sources/` with curated source dirs (skills + rules + docs) for compile/sync inputs
+- [ ] Add `test-fixtures/README.md` explaining the three buckets — short, future-agent-readable
 
-- [ ] Create a git commit by funneling a diff into a template, piping that through a configurable LLM, then pushing to GH and fetching remote changes. Default template collates additions/deletions/changes in conventional-commit format with light LLM commentary on themes.
+### `test-helpers.ts` builders
+- [ ] Implement `copyFixtureToTemp(name)` returning an isolated mutable copy with `setupIsolatedEnv` cleanup
+- [ ] Implement `seedProject`, `seedAgentTarget`, `seedSourceDir`, `seedRemoteRepo` — each takes a structured input object, writes to a temp dir, registers cleanup
+- [ ] Implement `assertCompiledIndexMatches` (or equivalent) for compile/sync output assertions
+- [ ] TSDoc each builder: inputs, outputs, cleanup contract
+- [ ] Rewrite `fixturesPath` callsites and TSDoc to match the new vocabulary
 
-### Cross-domain external-source adoption
+### Test migration
+- [ ] Migrate inline `makeTempDir` + `writeTextFile` scaffolding across the affected `*_test.ts` files to the `seed*` builders, file-by-file, keeping `deno task test` green at each step
+- [ ] Audit and delete fixtures no `*_test.ts` references after migration
 
-- [ ] Design a consistent way to safely pull external file changes back into reishi source — across rules, docs, and skills. Not a sprint task — needs deep thought before scoping. See `SPEC.md` Backlog for the open-questions list (diffing model, conflict mode, scope, surface, relationship to `skills pull`'s divergence protection).
-
-### Browsing and management UIs
-
-These are larger investments and probably wait until the tool migrates to Go or Rust — Deno isn't the right fit for any of them.
-
-- [ ] **TUI** — terminal UI for browsing and managing your library, launching `$EDITOR` and dropping back, doing bulk file operations.
-- [ ] **fzf integration** — fuzzy search across skills, rules, and docs; preview content or open in editor.
-- [ ] **Web UI** — local server for visual browsing and management; should mirror the TUI experience closely.
+### Developer docs
+- [ ] Add a "writing tests" section reachable from the repo root README or `docs/` covering the builder pattern and fixture vocabulary
