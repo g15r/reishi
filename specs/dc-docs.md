@@ -58,3 +58,35 @@
 
 - **dc-R080** — `rei docs compile [project]` writes the existing index *into source* (so it is git-trackable and visible) instead of straight to the target. With no project arg, compiles every mapped project.
 - **dc-R081** — The compiled-in-source index is the artifact `sync` ships when an agent target opts in to compilation (see `sy-R060+`).
+
+### Compiled index core fragment (Phase 16)
+
+- **dc-R090** — When a project's source dir contains a fragment whose filename matches `[docs].index_filename` (case-insensitive, default `AGENTS.md`), that fragment is the **core** of the compiled index: its content (frontmatter stripped) is emitted at the top of the output, followed by the linked-fragments section.
+- **dc-R091** — The core fragment is excluded from the linked-fragments list — it never appears as both inline content and a link in the same compiled output.
+- **dc-R092** — If multiple files in the project source match the index filename (case-collision on a case-sensitive filesystem), compilation aborts with a clear error naming the conflicting files.
+- **dc-R093** — The linked-fragments section follows the core inline content under a stable heading (`## Modular docs`) so the boundary between user-authored core and machine-generated index is visible to human readers.
+- **dc-R094** — Token-budget trimming (`dc-R043`) applies only to the linked-fragments section; the core fragment is always emitted in full regardless of `token_budget`.
+- **dc-R095** — Compilation emits a soft warning (does not fail) when the core fragment's token count exceeds `[docs].core_warn_tokens` (default `4000`). The warning text invites the user to consider modularizing and links to reishi's progressive-disclosure docs (placeholder URL until reishi-docs lands).
+- **dc-R096** — When no core fragment exists, the compiled output is the link-only index — existing pre-Phase-16 behavior, fully preserved.
+
+### Target overwrite protection (Phase 17)
+
+- **dc-R100** — The compiled index emitted to a project target ends with a stable trailing HTML-comment marker: `<!-- managed by reishi · source: <docs.source>/<project>/ -->`. The marker is the on-disk signal that reishi authored the file.
+- **dc-R101** — On `rei docs sync`, if the target index file exists and does not contain the reishi marker, sync copies the existing file to `<target>/<index_filename>.reishi-backup` before overwriting. If `<index_filename>.reishi-backup` already exists, the new backup is suffixed (`<name>.reishi-backup_2`, `_3`, ...) — never clobber a previous backup.
+- **dc-R102** — If the target index file contains the reishi marker, sync overwrites it directly (no backup — reishi authored it).
+- **dc-R103** — When a backup is written, sync prints a clear notice: `📦 backed up <path> → <path>.reishi-backup`.
+- **dc-R104** — There is no flag to disable the backup. The operation is cheap and idempotent; the backup file is easy for the user to delete manually if unwanted.
+
+### Heterogeneous doc import on project link (Phase 18)
+
+- **dc-R110** — When `rei config link project <name> --target <path>` runs, reishi scans the target for existing context files (the "scoop"). If any are found and the project source dir is empty, an interactive prompt offers: `Found N context files at <target>. Import as starting fragments? (Y/n)`. The flags `--import` and `--no-import` skip the prompt.
+- **dc-R111** — Default scoop patterns:
+  - Top-level files: `AGENTS.md`, `CLAUDE.md`, `GEMINI.md`, `CODEX.md`, `.cursorrules`, `CONVENTIONS.md`, `.github/copilot-instructions.md`.
+  - Recursive `.md` files under: `.claude/`, `.cursor/`, `.agents/`, `.docs/`, `docs/`.
+- **dc-R112** — Files matching `[docs].index_filename` (case-insensitive) at the target root are imported into the project source dir under that exact filename, so they become the core fragment per `dc-R090`.
+- **dc-R113** — Other imports are renamed by path-flattening: top-level files keep their stem (`CLAUDE.md` → `CLAUDE.md`); nested files use `<dir>-<stem>.md` (e.g. `.claude/rules/foo.md` → `claude-rules-foo.md`, `docs/architecture/db.md` → `docs-architecture-db.md`).
+- **dc-R114** — On naming collisions among imported files, the second-and-later collisions get numeric suffixes (`<name>_2.md`, `_3`, ...). Never overwrite a previously imported file mid-import.
+- **dc-R115** — Import is non-destructive at the target — files are read, never moved or deleted by the import step itself.
+- **dc-R116** — If the target index file (e.g. `<target>/AGENTS.md`) is among the imports, reishi also copies the original to `<target>/<index_filename>.reishi-backup` before the link command completes — providing a pre-reishi snapshot regardless of when first sync runs.
+- **dc-R117** — On import, reishi prints a per-file summary listing source path → fragment name (e.g. `✓ imported 7 files: AGENTS.md → AGENTS.md, .claude/rules/foo.md → claude-rules-foo.md, ...`).
+- **dc-R118** — If `--import` is set but the project source dir already contains fragments, the link command exits with a clear error (no overwrite, no merge in v1) and points the user at manual fragment-add commands. Re-import tooling lives in the cross-domain external-source-adoption backlog item.

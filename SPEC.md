@@ -58,6 +58,16 @@ Future requirements, open questions, and big ideas. Not active work — promote 
 
 - Create a git commit by funneling a diff into a template, piping that through a configurable LLM, then pushing to GH and fetching remote changes. Default template collates additions/deletions/changes in conventional-commit format with light LLM commentary on themes.
 
+### Cross-domain external-source adoption
+
+A consistent way to safely pull external file changes back into reishi source — across rules, docs, and skills. Today, `skills pull` handles remote → source with mtime/`synced_at` divergence protection, and the Phase 18 docs import handles a one-shot scoop at project-link time. Nothing covers "the user edited the target directly and wants those edits flowing back to source," nor re-importing project context after the initial link. Needs deep thought before scoping — it opens up diffing, conflict UX, and the question of whether sync becomes bidirectional. Open questions:
+
+- Diffing model — show the user a per-fragment diff before merging, or batch them?
+- Conflict mode — how do we surface ambiguous cases (target edited *and* source edited since last sync)?
+- Scope — bidirectional sync, or strictly target-to-source pull?
+- Surface — `rei <domain> reverse-sync`? `rei adopt`? Single top-level command with `--from-target`?
+- Should this subsume `skills pull`'s divergence protection mechanism, or stay parallel and consistent in spirit only?
+
 ### Browsing and management UIs
 
 These are larger investments and probably wait until the tool migrates to Go or Rust — Deno isn't the right fit for any of them.
@@ -70,4 +80,32 @@ These are larger investments and probably wait until the tool migrates to Go or 
 
 Unscoped tooling and configuration tasks. Flat list — Planner and Manager both add. Cleared by request.
 
-_(none currently)_
+### Test-suite reorg and expansion
+
+The project has scaled past what the original test scaffolding was designed for. `test-fixtures/` has unclear naming (project-source samples and remote-repo samples sit as sibling top-level dirs with similar names), and 14 of 17 `*_test.ts` files build state inline via `makeTempDir` + `writeTextFile`, leading to ~6k lines of test code with heavy duplicated scaffolding. Goal: a clear fixture vocabulary and named builder helpers so red-green TDD is the default for every Phase going forward, starting with Phase 16.
+
+Scope:
+
+- Reorganize `test-fixtures/` into purposeful top-level buckets:
+  - `remote-repos/` — current `repos/`, the GitHub-tarball fetch sources for `skills add` / `skills pull` tests.
+  - `project-targets/` — heterogeneous project-root layouts simulating real user repos (claude-only, cursor-only, mixed, AGENTS-only, deeply nested, none-detected). The foundation Phase 18 import work needs.
+  - `project-sources/` — curated reishi-source dirs (skills + rules + docs) used as compile/sync inputs.
+- Update `test-helpers.ts`:
+  - Rewrite `fixturesPath` callsites and TSDoc to match the new vocabulary.
+  - Add `copyFixtureToTemp(name)` so tests get isolated, mutable copies of on-disk fixtures.
+  - Extract the inline scaffolding patterns into named builders: `seedProject`, `seedAgentTarget`, `seedSourceDir`, `seedRemoteRepo`. Each takes a structured input (object), writes to a temp dir, and registers cleanup with the existing `setupIsolatedEnv` hook.
+  - Add a small `assertCompiledIndexMatches` (or equivalent) helper so compile/sync tests stop hand-rolling string comparisons.
+- Migrate inline scaffolding across the 14 affected `*_test.ts` files to use the builders. Mechanical, file-by-file. Tests must stay green at every step.
+- Add `test-fixtures/README.md` (the only doc-style README in `test-fixtures/`) explaining each top-level bucket — short, future-agent-readable.
+- Audit for and delete dead fixtures (anything no test references after migration).
+- Add a "writing tests" section to project developer docs describing the builder pattern and fixture vocabulary, so Phase 16+ subagents pick it up automatically.
+
+Acceptance:
+
+- Existing test suite stays green throughout (`deno task test` after each migration step).
+- `test-fixtures/` has a `README.md` and three clearly-named subdirs.
+- `test-helpers.ts` exports at least four `seed*` builders with TSDoc.
+- Inline `makeTempDir` + `writeTextFile` calls in `*_test.ts` drop meaningfully (readable wins matter more than exact line count).
+- Developer docs have a fixture/builder section reachable from the repo root README or `docs/`.
+
+This is Meta, not a Phase — it adds no behavior and has no requirement IDs. Runs sequentially before Phase 16 begins.

@@ -21,7 +21,7 @@
 ### Schema — config
 
 - **cf-R010** — Top-level keys: `sync_method` (`"copy"` | `"symlink"`), `default_prefix` (`"infer"` | `"none"`), `prefix_separator` (string, default `"_"`), `include_shared_agent` (bool, default `false` in defaults but `true` in `init` output).
-- **cf-R011** — `[skills]` table holds `source` (path); `[rules]` table holds `source` and optional `sync_method` override; `[docs]` table holds `source`, `default_target`, `index_filename`, optional `sync_method`, optional `token_budget`.
+- **cf-R011** — `[skills]` table holds `source` (path); `[rules]` table holds `source` and optional `sync_method` override; `[docs]` table holds `source`, `default_target`, `index_filename`, optional `sync_method`, optional `token_budget`, optional `core_warn_tokens` (default `4000`; soft-warns when a core fragment exceeds the threshold — see `dc-R095`).
 - **cf-R012** — `[updates]` table holds `enabled` (bool) and `interval_hours` (number).
 - **cf-R013** — `[agents.<name>]` tables each hold `skills` and `rules` path keys; the name `shared` is reserved and rejected on write (use `include_shared_agent`).
 - **cf-R014** — `[projects.<name>]` tables hold `path` (project root) and optional `fragments` array; paths are normalized on write (expand `~`, condense back to `~/` for storage).
@@ -51,3 +51,4 @@
 - **cf-R044** — `rei config unlink agent <name>` removes the matching `[agents.<name>]` entry.
 - **cf-R045** — `rei config unlink project <name>` removes the matching `[projects.<name>]` entry.
 - **cf-R046** — `rei docs add` is preserved as a deprecated alias of `rei config link project`: still functional, but help text and runtime stderr point to the new home.
+- **cf-R047** — `rei config link project` accepts `--import` and `--no-import` flags to drive the heterogeneous doc-import flow defined in `dc-R110+`. The deprecated `rei docs add` alias accepts the same flags.
