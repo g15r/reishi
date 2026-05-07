@@ -71,13 +71,21 @@
 - [ ] Backup writes the original target index before link completes
 - [ ] `--no-import` and `--import` both bypass the interactive prompt
 
-## Backlog
+## Phase 19: Streamline `skills new` scaffold
+**Requirements**: sk-R010, sk-R012, sk-R013
 
-Future requirements, open questions, and big ideas. Not active work — promote into a Phase or delete; lingering items are noise.
+Scaffold today drops four files into a new skill (`SKILL.md`, `example-reference.md`, `scripts/example.ts`, `assets/example_asset.txt`). In practice the bottom three are deleted as step 1 ~90% of the time. Replace them with thorough in-template guidance so users add structure only when they actually need it. Also retire the `references/` subdirectory pattern — modular reference docs are now flat alongside `SKILL.md`.
 
-### Skills linting
+### Template surface
+- [ ] Delete `assets/example_asset.txt.tmpl`, `assets/example_script.ts.tmpl`, `assets/example_reference.md.tmpl` from the repo
+- [ ] Rewrite `assets/SKILL.md.tmpl` so its layout guidance covers: flat modular reference markdown alongside `SKILL.md` (e.g. `cool-skill/api-design.md`), `scripts/` for executables, `assets/` for output artifacts — concrete examples from real skills, no "delete this section when done" boilerplate
+- [ ] Purge every `references/` mention from `SKILL.md.tmpl` — the subdirectory pattern is retired
+- [ ] Drop the embed entries for the removed templates from the template loader
 
-- [ ] Update `skills validate` to use linter/formatter semantics — `skills lint`, `skills lint --fix`. Combine deeper validation of skill spec rules with markdownlint-style markdown checks, and auto-fix where possible (table formatting, etc.). Consider extracting a `skillint` library that wraps markdownlint and adds agent-context-engineering rules. Lower-priority extension to rules and docs (pure markdown linting).
+### `rei skills new` scaffolder
+- [ ] Stop creating `scripts/`, `assets/`, `example-reference.md`; only write `SKILL.md`
+- [ ] Trim the post-scaffold "Next steps" output to match (no reference to deleted example files)
+- [ ] Verify the binary build path: `deno task compile` followed by `rei skills new` produces the same single-file scaffold
 
 ### Tests
 - [ ] Update `cli_test.ts` and `compile_test.ts` cases that assert the four-file layout to assert single-file `SKILL.md` only

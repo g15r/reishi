@@ -16,9 +16,10 @@
 
 ### `rei skills new`
 
-- **sk-R010** — `rei skills new <name>` scaffolds a new skill from the embedded template (`SKILL.md`, `example-reference.md`, `scripts/example.ts`, `assets/example_asset.txt`) into `skills.source/<name>/`.
+- **sk-R010** — `rei skills new <name>` scaffolds a minimal skill from the embedded template — a single `SKILL.md` — into `skills.source/<name>/`. No example resource files or subdirectories are created; users add `scripts/`, `assets/`, or `references/` themselves when needed.
 - **sk-R011** — `rei skills new <name> --path <dir>` scaffolds into the given dir; auto-sync to targets only fires when `--path` resolves inside `skills.source`.
-- **sk-R012** — Embedded template assets must resolve from the compiled binary as well as `deno run`.
+- **sk-R012** — The embedded `SKILL.md` template must resolve from the compiled binary as well as `deno run`.
+- **sk-R013** — The `SKILL.md` template body teaches the conventional skill-layout patterns thoroughly enough that users can add the right structure on demand without consulting external docs. Modular reference docs live flat alongside `SKILL.md` (e.g. `cool-skill/SKILL.md`, `cool-skill/api-design.md`); `scripts/` (executables) and `assets/` (output artifacts) remain as subdirectory conventions. The `references/` subdirectory is not a reishi convention and must not appear in the template. Guidance is descriptive (when to reach for each, with concrete examples) rather than prescriptive (no boilerplate to delete).
 
 ### `rei skills validate`
 
