@@ -16,7 +16,7 @@ import {
 } from './config.ts';
 import { moveSkill, removeSkill } from './sync.ts';
 import { moveRule, removeRule, stripMdSuffix } from './rules.ts';
-import { moveFragment, removeFragment } from './docs.ts';
+import { moveDoc, removeDoc } from './docs.ts';
 import { seedSourceDir, setupIsolatedEnv } from './test-helpers.ts';
 
 async function withEnv(
@@ -148,54 +148,54 @@ Deno.test('removeRule: refuses missing source', async () => {
 });
 
 // ---------------------------------------------------------------------------
-// Docs (fragment-level)
+// Docs (doc-level)
 // ---------------------------------------------------------------------------
 
-Deno.test('moveFragment: renames file under project dir', async () => {
+Deno.test('moveDoc: renames file under project dir', async () => {
   const env = await setupIsolatedEnv();
   try {
     await withEnv(env.env, async () => {
       await seedSourceDir(env, { docs: { p: { 'old.md': '# old' } } });
       const projDir = join(env.docsDir, 'p');
 
-      const result = await moveFragment('p', 'old', 'new');
+      const result = await moveDoc('p', 'old', 'new');
       assertEquals(result.toPath, join(projDir, 'new.md'));
       assert(!(await exists(join(projDir, 'old.md'))));
       assert(await exists(join(projDir, 'new.md')));
-      assertEquals(result.rewroteFragmentsArray, false);
+      assertEquals(result.rewroteFilesArray, false);
     });
   } finally {
     await env.cleanup();
   }
 });
 
-Deno.test('moveFragment: rewrites [projects.*].fragments when present', async () => {
+Deno.test('moveDoc: rewrites [projects.*].files when present', async () => {
   const env = await setupIsolatedEnv();
   try {
     await withEnv(env.env, async () => {
       await seedSourceDir(env, { docs: { p: { 'old.md': 'x', 'keep.md': 'y' } } });
       await patchConfig(env.configPath, {
         projects: {
-          p: { path: '~/code/p', fragments: ['old.md', 'keep.md'] },
+          p: { path: '~/code/p', files: ['old.md', 'keep.md'] },
         },
       });
 
-      const result = await moveFragment('p', 'old', 'new');
-      assertEquals(result.rewroteFragmentsArray, true);
+      const result = await moveDoc('p', 'old', 'new');
+      assertEquals(result.rewroteFilesArray, true);
       const cfg = await loadConfig();
-      assertEquals(cfg.projects?.p?.fragments, ['new.md', 'keep.md']);
+      assertEquals(cfg.projects?.p?.files, ['new.md', 'keep.md']);
     });
   } finally {
     await env.cleanup();
   }
 });
 
-Deno.test('moveFragment: missing project errors', async () => {
+Deno.test('moveDoc: missing project errors', async () => {
   const env = await setupIsolatedEnv();
   try {
     await withEnv(env.env, async () => {
       await assertRejects(
-        () => moveFragment('nope', 'a', 'b'),
+        () => moveDoc('nope', 'a', 'b'),
         Error,
         'docs project not found',
       );
@@ -205,7 +205,7 @@ Deno.test('moveFragment: missing project errors', async () => {
   }
 });
 
-Deno.test('removeFragment: deletes file and prunes fragments array', async () => {
+Deno.test('removeDoc: deletes file and prunes files array', async () => {
   const env = await setupIsolatedEnv();
   try {
     await withEnv(env.env, async () => {
@@ -214,15 +214,15 @@ Deno.test('removeFragment: deletes file and prunes fragments array', async () =>
       await Deno.writeTextFile(join(projDir, 'keep.md'), 'y');
       await patchConfig(env.configPath, {
         projects: {
-          p: { path: '~/code/p', fragments: ['gone.md', 'keep.md'] },
+          p: { path: '~/code/p', files: ['gone.md', 'keep.md'] },
         },
       });
 
-      const result = await removeFragment('p', 'gone');
-      assertEquals(result.rewroteFragmentsArray, true);
+      const result = await removeDoc('p', 'gone');
+      assertEquals(result.rewroteFilesArray, true);
       assert(!(await exists(join(projDir, 'gone.md'))));
       const cfg = await loadConfig();
-      assertEquals(cfg.projects?.p?.fragments, ['keep.md']);
+      assertEquals(cfg.projects?.p?.files, ['keep.md']);
     });
   } finally {
     await env.cleanup();

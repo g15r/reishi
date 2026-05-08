@@ -96,10 +96,10 @@ export function stripMdSuffix(name: string): string {
 }
 
 /**
- * Validate a fragment-style basename: non-empty, no path separators, no leading
- * dot. Returns an error message string or null if valid.
+ * Validate a basename: non-empty, no path separators, no leading dot.
+ * Returns an error message string or null if valid.
  */
-function validateFragmentBasename(name: string, kind: string): string | null {
+function validateBasename(name: string, kind: string): string | null {
   if (!name || name.length === 0) return `${kind} name cannot be empty`;
   if (name.includes('/') || name.includes('\\')) {
     return `${kind} name cannot contain path separators`;
@@ -114,7 +114,7 @@ export interface MoveRuleResult {
 }
 
 /**
- * Rename a rule fragment in source. Source-only — target cleanup is handled by
+ * Rename a rule in source. Source-only — target cleanup is handled by
  * `clean_on_sync` on the next sync. Accepts either `foo` or `foo.md`.
  */
 export async function moveRule(
@@ -123,7 +123,7 @@ export async function moveRule(
 ): Promise<MoveRuleResult> {
   const oldStem = stripMdSuffix(oldName);
   const newStem = stripMdSuffix(newName);
-  const err = validateFragmentBasename(newStem, 'rule');
+  const err = validateBasename(newStem, 'rule');
   if (err) throw new Error(err);
   if (oldStem === newStem) {
     throw new Error(`old and new name are the same: ${oldStem}`);
@@ -146,7 +146,7 @@ export interface RemoveRuleResult {
 }
 
 /**
- * Delete a rule fragment from source. Source-only — target cleanup is handled
+ * Delete a rule from source. Source-only — target cleanup is handled
  * by `clean_on_sync` on the next sync. Accepts either `foo` or `foo.md`.
  */
 export async function removeRule(name: string): Promise<RemoveRuleResult> {
@@ -189,19 +189,19 @@ export function resolveCompileTarget(
 export interface CompileRulesResult {
   /** Absolute path to the source artifact written. */
   outputPath: string;
-  fragmentCount: number;
+  ruleCount: number;
 }
 
 /**
- * Concatenate every fragment in `rules.source` into a single markdown file
+ * Concatenate every rule in `rules.source` into a single markdown file
  * in source. The artifact lives at `<rules.source>/AGENTS.md` by default —
  * git-trackable, user-visible, ready for sync to ship to compile-opt-in
  * agents.
  *
  * Format: a top-level `# Agent rules` header, then one `## <name>` section
- * per fragment with the fragment body inlined (frontmatter preserved as-is).
- * The compile artifact itself is excluded from the input set so re-running
- * doesn't double-nest.
+ * per rule with the body inlined (frontmatter preserved as-is). The compile
+ * artifact itself is excluded from the input set so re-running doesn't
+ * double-nest.
  */
 export async function compileRules(
   options: { outputPath?: string } = {},
@@ -213,7 +213,7 @@ export async function compileRules(
     !(r.kind === 'file' && resolve(r.path) === resolve(outputPath))
   );
 
-  // Read each fragment's body in parallel, preserving the source-listing order
+  // Read each rule's body in parallel, preserving the source-listing order
   // so the compiled artifact is stable across runs.
   const sectionsPerRule = await Promise.all(filtered.map(async (r) => {
     if (r.kind === 'directory') {
@@ -237,7 +237,7 @@ export async function compileRules(
   const parts = ['# Agent rules\n', ...sections];
   await Deno.mkdir(dirname(outputPath), { recursive: true });
   await Deno.writeTextFile(outputPath, parts.join(''));
-  return { outputPath, fragmentCount: sections.length };
+  return { outputPath, ruleCount: sections.length };
 }
 
 // ============================================================================
@@ -371,7 +371,7 @@ export async function syncRules(
   }
 
   // Ship the rules-compile artifact to every opt-in agent. Independent of the
-  // per-fragment loop above so target-parent or per-rule failures don't block
+  // per-rule loop above so target-parent or per-rule failures don't block
   // the compile artifact (and vice versa).
   for (const [agentName, agent] of participatingAgents) {
     if (agent.compile !== true) continue;

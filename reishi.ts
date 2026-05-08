@@ -69,11 +69,11 @@ import {
   compileDocsToSource,
   formatCompileSummary,
   getDocProjectNames,
-  getFragmentNames,
+  getDocNames,
   listDocProjects,
-  listFragments,
-  moveFragment,
-  removeFragment,
+  listDocs,
+  moveDoc,
+  removeDoc,
   unlinkProject,
   syncDocs,
 } from './docs.ts';
@@ -1724,8 +1724,8 @@ const rulesCommand = new Command()
     try {
       const result = await compileRules({ outputPath: options.out });
       console.log(
-        `${green('✨ Compiled')} ${result.fragmentCount} rule${
-          result.fragmentCount === 1 ? '' : 's'
+        `${green('✨ Compiled')} ${result.ruleCount} rule${
+          result.ruleCount === 1 ? '' : 's'
         } → ${magenta(result.outputPath)}`,
       );
       Deno.exit(0);
@@ -1737,7 +1737,7 @@ const rulesCommand = new Command()
   })
   .command('move <old-name:string:rule-name> <new-name:string>')
   .alias('mv')
-  .description('Rename a rule fragment in source (`.md` suffix optional)')
+  .description('Rename a rule in source (`.md` suffix optional)')
   .example('Rename a rule', 'rei rules move old-rule new-rule')
   .action(async (_options, oldName, newName) => {
     try {
@@ -1756,7 +1756,7 @@ const rulesCommand = new Command()
   })
   .command('remove <name:string:rule-name>')
   .alias('rm')
-  .description('Delete a rule fragment from source (`.md` suffix optional)')
+  .description('Delete a rule from source (`.md` suffix optional)')
   .example('Remove a rule', 'rei rules remove no-deletes')
   .action(async (_options, name) => {
     try {
@@ -1788,31 +1788,31 @@ const rulesCommand = new Command()
 cli.command('rules', rulesCommand);
 
 // Docs command (subcommands: list, add, remove, sync).
-// Users manage fragment files directly. Reishi creates projects (dir + config
+// Users manage doc files directly. Reishi creates projects (dir + config
 // entry), lists what's there, removes projects, and distributes the compiled
 // index to project roots.
 const docsCommand = new Command()
-  .description('Manage project-scoped doc fragments compiled into a token-efficient index')
+  .description('Manage project-scoped docs compiled into a token-efficient index')
   .action(function () {
     this.showHelp();
   })
   .command('list [project:string:doc-project]')
   .alias('ls')
-  .description('List doc projects, or fragments within a project')
+  .description('List doc projects, or docs within a project')
   .example('List doc projects', 'rei docs list')
-  .example('List fragments in a project', 'rei docs list myproject')
+  .example('List docs in a project', 'rei docs list myproject')
   .action(async (_options, project) => {
     if (project) {
-      const fragments = await listFragments(project);
-      if (fragments.length === 0) {
-        console.log(`No fragments in ${magenta(project)}.`);
+      const docs = await listDocs(project);
+      if (docs.length === 0) {
+        console.log(`No docs in ${magenta(project)}.`);
         Deno.exit(0);
       }
-      for (const f of fragments) {
+      for (const f of docs) {
         console.log(`  ${f.name} ${dim(italic(`(${f.size} bytes)`))}`);
       }
       console.log(
-        `\n${fragments.length} fragment${fragments.length === 1 ? '' : 's'} in ${magenta(project)}`,
+        `\n${docs.length} doc${docs.length === 1 ? '' : 's'} in ${magenta(project)}`,
       );
       Deno.exit(0);
     }
@@ -1822,9 +1822,9 @@ const docsCommand = new Command()
       Deno.exit(0);
     }
     for (const name of projects) {
-      const fragments = await listFragments(name);
+      const docs = await listDocs(name);
       console.log(
-        `  ${name} ${dim(italic(`(${fragments.length} fragment${fragments.length === 1 ? '' : 's'})`))}`,
+        `  ${name} ${dim(italic(`(${docs.length} doc${docs.length === 1 ? '' : 's'})`))}`,
       );
     }
     console.log(
@@ -1895,18 +1895,18 @@ const docsCommand = new Command()
   })
   .command('move <project:string:doc-project> <old-name:string> <new-name:string>')
   .alias('mv')
-  .description('Rename a fragment in a project (`.md` suffix optional)')
-  .example('Rename a fragment', 'rei docs move myproject api-old api-new')
+  .description('Rename a doc in a project (`.md` suffix optional)')
+  .example('Rename a doc', 'rei docs move myproject api-old api-new')
   .action(async (_options, project, oldName, newName) => {
     try {
-      const result = await moveFragment(project, oldName, newName);
+      const result = await moveDoc(project, oldName, newName);
       console.log(
         `${green('🪪 Renamed')} ${magenta(`${project}/${oldName}`)} → ${
           magenta(`${project}/${newName}`)
         } ${dim(italic(`(${result.toPath})`))}`,
       );
-      if (result.rewroteFragmentsArray) {
-        console.log(`   ${dim(italic('[projects.*].fragments updated'))}`);
+      if (result.rewroteFilesArray) {
+        console.log(`   ${dim(italic('[projects.*].files updated'))}`);
       }
       Deno.exit(0);
     } catch (error) {
@@ -1915,20 +1915,20 @@ const docsCommand = new Command()
       Deno.exit(1);
     }
   })
-  .command('remove <project:string:doc-project> <fragment:string>')
+  .command('remove <project:string:doc-project> <doc:string>')
   .alias('rm')
-  .description('Delete a fragment from a project (`.md` suffix optional)')
-  .example('Remove a fragment', 'rei docs remove myproject stale-fragment')
-  .action(async (_options, project, fragment) => {
+  .description('Delete a doc from a project (`.md` suffix optional)')
+  .example('Remove a doc', 'rei docs remove myproject stale-doc')
+  .action(async (_options, project, doc) => {
     try {
-      const result = await removeFragment(project, fragment);
+      const result = await removeDoc(project, doc);
       console.log(
-        `${green('🗑  Removed')} ${magenta(`${project}/${fragment}`)} ${
+        `${green('🗑  Removed')} ${magenta(`${project}/${doc}`)} ${
           dim(italic(`(${result.removedPath})`))
         }`,
       );
-      if (result.rewroteFragmentsArray) {
-        console.log(`   ${dim(italic('[projects.*].fragments updated'))}`);
+      if (result.rewroteFilesArray) {
+        console.log(`   ${dim(italic('[projects.*].files updated'))}`);
       }
       Deno.exit(0);
     } catch (error) {

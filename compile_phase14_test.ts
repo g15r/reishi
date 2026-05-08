@@ -102,7 +102,7 @@ Deno.test('compileRules: writes <rules.source>/AGENTS.md by default', async () =
 
       const result = await compileRules();
       assertEquals(result.outputPath, join(rulesDir, COMPILED_RULES_FILENAME));
-      assertEquals(result.fragmentCount, 2);
+      assertEquals(result.ruleCount, 2);
 
       const text = await Deno.readTextFile(result.outputPath);
       assertStringIncludes(text, '# Agent rules');
@@ -122,11 +122,11 @@ Deno.test('compileRules: excludes the artifact itself on re-run', async () => {
     await withEnv(env.env, async () => {
       await seedSourceDir(env, { rules: { 'a.md': '# A\n' } });
       const first = await compileRules();
-      assertEquals(first.fragmentCount, 1);
+      assertEquals(first.ruleCount, 1);
 
       const second = await compileRules();
       // Source artifact present from the first run must not double-count itself.
-      assertEquals(second.fragmentCount, 1);
+      assertEquals(second.ruleCount, 1);
     });
   } finally {
     await env.cleanup();

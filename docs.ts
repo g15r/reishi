@@ -1,17 +1,17 @@
 /**
- * reishi docs module — project-scoped doc fragments compiled into a
- * token-efficient index and distributed to project roots on disk.
+ * reishi docs module — project-scoped docs compiled into a token-efficient
+ * index and distributed to project roots on disk.
  *
  * Layout:
  *   <docs.source>/
  *     <project-name>/
- *       fragment-a.md
- *       fragment-b.md
+ *       doc-a.md
+ *       doc-b.md
  *
  * Differences from skills/rules:
  *   - Docs are flat-per-project: only direct `.md` children count for v1.
  *   - Targets are real project dirs on disk, not a shared user-level path.
- *   - Fragments are copied/symlinked to `<target>/<docs.default_target>/`,
+ *   - Doc files are copied/symlinked to `<target>/<docs.default_target>/`,
  *     and the compiled index is written to `<target>/<index_filename>`.
  *
  * Sync method resolution mirrors the skills/rules precedence:
@@ -37,7 +37,7 @@ import { resolveMethod, type SyncAction } from './sync.ts';
 // Types
 // ============================================================================
 
-export interface FragmentEntry {
+export interface DocEntry {
   name: string;
   path: string;
   size: number;
@@ -52,10 +52,10 @@ export interface CompileOptions {
   dryRun?: boolean;
   method?: SyncMethod;
   /**
-   * Restrict compiled output to these fragment basenames (e.g. `api.md`).
-   * Undefined = every fragment under the project.
+   * Restrict compiled output to these doc basenames (e.g. `api.md`).
+   * Undefined = every doc under the project.
    */
-  fragments?: string[];
+  files?: string[];
 }
 
 export interface CompileResult {
@@ -63,7 +63,7 @@ export interface CompileResult {
   targetRoot: string;
   indexPath: string;
   index: string;
-  fragmentsWritten: number;
+  docsWritten: number;
   action: DocsSyncAction;
   reason?: string;
 }
@@ -87,9 +87,9 @@ export async function listDocProjects(): Promise<string[]> {
 }
 
 /** Direct `.md` children of a project dir. Nested dirs and dotfiles are ignored. */
-export async function listFragments(project: string): Promise<FragmentEntry[]> {
+export async function listDocs(project: string): Promise<DocEntry[]> {
   const dir = join(await getDocsSourceDir(), project);
-  const out: FragmentEntry[] = [];
+  const out: DocEntry[] = [];
   if (!(await exists(dir))) return out;
   for await (const entry of Deno.readDir(dir)) {
     if (entry.name.startsWith('.')) continue;
@@ -223,16 +223,16 @@ export async function getDocProjectNames(): Promise<string[]> {
 }
 
 /**
- * Return fragment filenames for a given project — used for tab completion
+ * Return doc filenames for a given project — used for tab completion
  * once a project argument is already known.
  */
-export async function getFragmentNames(project: string): Promise<string[]> {
-  const fragments = await listFragments(project);
-  return fragments.map((f) => f.name);
+export async function getDocNames(project: string): Promise<string[]> {
+  const docs = await listDocs(project);
+  return docs.map((f) => f.name);
 }
 
 // ============================================================================
-// Fragment-level move and remove
+// Doc-level move and remove
 // ============================================================================
 
 /** Strip an optional trailing `.md` so callers may pass `foo` or `foo.md`. */
@@ -240,36 +240,36 @@ export function stripMdSuffix(name: string): string {
   return name.endsWith('.md') ? name.slice(0, -3) : name;
 }
 
-function validateFragmentBasename(name: string): string | null {
-  if (!name || name.length === 0) return 'fragment name cannot be empty';
+function validateDocBasename(name: string): string | null {
+  if (!name || name.length === 0) return 'doc name cannot be empty';
   if (name.includes('/') || name.includes('\\')) {
-    return 'fragment name cannot contain path separators';
+    return 'doc name cannot contain path separators';
   }
-  if (name.startsWith('.')) return 'fragment name cannot start with a dot';
+  if (name.startsWith('.')) return 'doc name cannot start with a dot';
   return null;
 }
 
-export interface MoveFragmentResult {
+export interface MoveDocResult {
   fromPath: string;
   toPath: string;
-  /** True when the project's [projects.<name>].fragments array was rewritten. */
-  rewroteFragmentsArray: boolean;
+  /** True when the project's [projects.<name>].files array was rewritten. */
+  rewroteFilesArray: boolean;
 }
 
 /**
- * Rename a fragment under `<docs.source>/<project>/`. Source-only — target
+ * Rename a doc under `<docs.source>/<project>/`. Source-only — target
  * cleanup happens on next sync. If the project's
- * `[projects.<name>].fragments` array references the old basename, the entry
+ * `[projects.<name>].files` array references the old basename, the entry
  * is rewritten in-place (preserving order).
  */
-export async function moveFragment(
+export async function moveDoc(
   project: string,
   oldName: string,
   newName: string,
-): Promise<MoveFragmentResult> {
+): Promise<MoveDocResult> {
   const oldStem = stripMdSuffix(oldName);
   const newStem = stripMdSuffix(newName);
-  const err = validateFragmentBasename(newStem);
+  const err = validateDocBasename(newStem);
   if (err) throw new Error(err);
   if (oldStem === newStem) {
     throw new Error(`old and new name are the same: ${oldStem}`);
@@ -282,43 +282,43 @@ export async function moveFragment(
   const fromPath = join(projectDir, `${oldStem}.md`);
   const toPath = join(projectDir, `${newStem}.md`);
   if (!(await exists(fromPath))) {
-    throw new Error(`fragment not found: ${oldStem}.md`);
+    throw new Error(`doc not found: ${oldStem}.md`);
   }
   if (await exists(toPath)) {
     throw new Error(`destination already exists: ${newStem}.md`);
   }
   await Deno.rename(fromPath, toPath);
 
-  let rewroteFragmentsArray = false;
+  let rewroteFilesArray = false;
   const config = await loadConfig();
   const entry = config.projects?.[project];
-  if (entry?.fragments) {
+  if (entry?.files) {
     const oldFile = `${oldStem}.md`;
     const newFile = `${newStem}.md`;
-    if (entry.fragments.includes(oldFile)) {
-      const next = entry.fragments.map((f) => f === oldFile ? newFile : f);
-      config.projects![project] = { ...entry, fragments: next };
+    if (entry.files.includes(oldFile)) {
+      const next = entry.files.map((f) => f === oldFile ? newFile : f);
+      config.projects![project] = { ...entry, files: next };
       await saveConfig(config);
-      rewroteFragmentsArray = true;
+      rewroteFilesArray = true;
     }
   }
-  return { fromPath, toPath, rewroteFragmentsArray };
+  return { fromPath, toPath, rewroteFilesArray };
 }
 
-export interface RemoveFragmentResult {
+export interface RemoveDocResult {
   removedPath: string;
-  rewroteFragmentsArray: boolean;
+  rewroteFilesArray: boolean;
 }
 
 /**
- * Delete a fragment under `<docs.source>/<project>/`. Source-only. If the
- * project's `[projects.<name>].fragments` array references the basename, the
+ * Delete a doc under `<docs.source>/<project>/`. Source-only. If the
+ * project's `[projects.<name>].files` array references the basename, the
  * entry is dropped from the array.
  */
-export async function removeFragment(
+export async function removeDoc(
   project: string,
   name: string,
-): Promise<RemoveFragmentResult> {
+): Promise<RemoveDocResult> {
   const stem = stripMdSuffix(name);
   const projectDir = join(await getDocsSourceDir(), project);
   if (!(await exists(projectDir))) {
@@ -326,28 +326,28 @@ export async function removeFragment(
   }
   const path = join(projectDir, `${stem}.md`);
   if (!(await exists(path))) {
-    throw new Error(`fragment not found: ${stem}.md`);
+    throw new Error(`doc not found: ${stem}.md`);
   }
   await Deno.remove(path);
 
-  let rewroteFragmentsArray = false;
+  let rewroteFilesArray = false;
   const config = await loadConfig();
   const entry = config.projects?.[project];
   const file = `${stem}.md`;
-  if (entry?.fragments && entry.fragments.includes(file)) {
-    const next = entry.fragments.filter((f) => f !== file);
-    config.projects![project] = { ...entry, fragments: next };
+  if (entry?.files && entry.files.includes(file)) {
+    const next = entry.files.filter((f) => f !== file);
+    config.projects![project] = { ...entry, files: next };
     await saveConfig(config);
-    rewroteFragmentsArray = true;
+    rewroteFilesArray = true;
   }
-  return { removedPath: path, rewroteFragmentsArray };
+  return { removedPath: path, rewroteFilesArray };
 }
 
 // ============================================================================
 // Index compilation
 // ============================================================================
 
-interface ParsedFragment {
+interface ParsedDoc {
   name: string;
   path: string;
   description: string;
@@ -410,7 +410,7 @@ function extractDescription(
   return firstHeading;
 }
 
-async function parseFragment(entry: FragmentEntry): Promise<ParsedFragment> {
+async function parseDoc(entry: DocEntry): Promise<ParsedDoc> {
   const text = await Deno.readTextFile(entry.path);
   const { frontmatter, body } = splitFrontmatter(text);
   const description = extractDescription(frontmatter, body);
@@ -428,23 +428,23 @@ function approxTokens(text: string): number {
 
 /**
  * Compile the markdown index for a project, relative to a target dir. The
- * index includes as many fragments (priority then alphabetical) as fit under
- * `token_budget`; truncated fragments are reported in a trailing one-liner.
+ * index includes as many docs (priority then alphabetical) as fit under
+ * `token_budget`; truncated docs are reported in a trailing one-liner.
  *
- * `targetDir` is the project root; fragment links are emitted relative to it
+ * `targetDir` is the project root; doc links are emitted relative to it
  * via the configured `docs.default_target` subdir.
  */
 export async function compileIndex(
   project: string,
   targetDir: string,
-  options: { fragments?: string[] } = {},
+  options: { files?: string[] } = {},
 ): Promise<string> {
   const config = await loadConfig();
-  const all = await listFragments(project);
-  const filtered = options.fragments
-    ? all.filter((f) => options.fragments!.includes(f.name))
+  const all = await listDocs(project);
+  const filtered = options.files
+    ? all.filter((f) => options.files!.includes(f.name))
     : all;
-  const parsed = await Promise.all(filtered.map(parseFragment));
+  const parsed = await Promise.all(filtered.map(parseDoc));
   // Priority descending, then alphabetical by filename.
   parsed.sort((a, b) => {
     if (b.priority !== a.priority) return b.priority - a.priority;
@@ -455,7 +455,7 @@ export async function compileIndex(
   const budget = config.docs.token_budget ?? 4000;
 
   let header = `# ${project} — docs index\n\n`;
-  header += `Docs for this project. Fragments live in \`${targetSubdir}/\`.\n\n`;
+  header += `Docs for this project. Files live in \`${targetSubdir}/\`.\n\n`;
 
   const parts: string[] = [header];
   let tokens = approxTokens(header);
@@ -463,7 +463,7 @@ export async function compileIndex(
 
   for (const f of parsed) {
     const desc = f.description ? f.description : '(no description)';
-    // Relative link from index file (at targetDir) to the fragment copy.
+    // Relative link from index file (at targetDir) to the doc copy.
     const relPath = join(targetSubdir, f.name);
     const section = `## ${f.name}\n${desc}\n\nSee: \`${relPath}\`\n\n`;
     const cost = approxTokens(section);
@@ -475,7 +475,7 @@ export async function compileIndex(
 
   const omitted = parsed.length - included;
   if (omitted > 0) {
-    parts.push(`(... ${omitted} more fragment${omitted === 1 ? '' : 's'} omitted)\n`);
+    parts.push(`(... ${omitted} more doc${omitted === 1 ? '' : 's'} omitted)\n`);
   }
   // `relative` reserved for future "link to source" mode; suppress unused warn.
   void relative;
@@ -501,7 +501,7 @@ export interface CompileToSourceResult {
  */
 export async function compileDocsToSource(
   project: string,
-  options: { fragments?: string[] } = {},
+  options: { files?: string[] } = {},
 ): Promise<CompileToSourceResult> {
   const config = await loadConfig();
   const projectDir = join(await getDocsSourceDir(), project);
@@ -512,20 +512,20 @@ export async function compileDocsToSource(
   // index filename so it is ready to ship one-for-one to <target>/<index_filename>.
   const outputPath = join(projectDir, config.docs.index_filename);
   const index = await compileIndex(project, projectDir, {
-    fragments: options.fragments,
+    files: options.files,
   });
   await Deno.writeTextFile(outputPath, index);
   return { outputPath, index };
 }
 
 // ============================================================================
-// Compile command — writes index + distributes fragments to a target dir
+// Compile command — writes index + distributes docs to a target dir
 // ============================================================================
 
 /**
  * Compile and distribute a project's docs to `targetDir` (a real project root
  * on disk). The compiled index is written to `<targetDir>/<index_filename>`
- * and every fragment is copied/symlinked into `<targetDir>/<docs.default_target>/`.
+ * and every doc is copied/symlinked into `<targetDir>/<docs.default_target>/`.
  *
  * Honors `options.stdout` (emit index to stdout, write nothing) and
  * `options.dryRun` (plan only).
@@ -539,7 +539,7 @@ export async function compileToTarget(
   const targetRoot = expandHome(targetDir);
   const indexPath = join(targetRoot, config.docs.index_filename);
   const indexText = await compileIndex(project, targetRoot, {
-    fragments: options.fragments,
+    files: options.files,
   });
 
   if (options.stdout) {
@@ -548,7 +548,7 @@ export async function compileToTarget(
       targetRoot,
       indexPath,
       index: indexText,
-      fragmentsWritten: 0,
+      docsWritten: 0,
       action: 'skipped',
       reason: 'stdout',
     };
@@ -559,12 +559,12 @@ export async function compileToTarget(
     config.docs.sync_method,
     options.method,
   );
-  const fragmentsDir = join(targetRoot, config.docs.default_target);
+  const docsDir = join(targetRoot, config.docs.default_target);
 
-  const allFragments = await listFragments(project);
-  const selected = options.fragments
-    ? allFragments.filter((f) => options.fragments!.includes(f.name))
-    : allFragments;
+  const allDocs = await listDocs(project);
+  const selected = options.files
+    ? allDocs.filter((f) => options.files!.includes(f.name))
+    : allDocs;
 
   if (options.dryRun) {
     return {
@@ -572,7 +572,7 @@ export async function compileToTarget(
       targetRoot,
       indexPath,
       index: indexText,
-      fragmentsWritten: selected.length,
+      docsWritten: selected.length,
       action: method === 'symlink' ? 'symlinked' : 'copied',
       reason: 'dry run',
     };
@@ -585,7 +585,7 @@ export async function compileToTarget(
       targetRoot,
       indexPath,
       index: indexText,
-      fragmentsWritten: 0,
+      docsWritten: 0,
       action: 'skipped',
       reason: `parent dir missing: ${parent}`,
     };
@@ -602,7 +602,7 @@ export async function compileToTarget(
     await Deno.writeTextFile(sourceIndexPath, indexText);
 
     await Deno.mkdir(targetRoot, { recursive: true });
-    await Deno.mkdir(fragmentsDir, { recursive: true });
+    await Deno.mkdir(docsDir, { recursive: true });
     if (method === 'symlink') {
       // Replace any stale entry first.
       try {
@@ -614,16 +614,16 @@ export async function compileToTarget(
       await Deno.copyFile(sourceIndexPath, indexPath);
     }
 
-    // Clear any stale fragments in the target dir first — keeps rename/remove
+    // Clear any stale doc files in the target dir first — keeps rename/remove
     // propagation correct without tracking per-file state.
-    for await (const entry of Deno.readDir(fragmentsDir)) {
+    for await (const entry of Deno.readDir(docsDir)) {
       if (entry.name.startsWith('.')) continue;
-      await Deno.remove(join(fragmentsDir, entry.name), { recursive: true });
+      await Deno.remove(join(docsDir, entry.name), { recursive: true });
     }
 
-    // Each fragment is independent — write them in parallel.
+    // Each doc is independent — write them in parallel.
     await Promise.all(selected.map(async (f) => {
-      const dest = join(fragmentsDir, f.name);
+      const dest = join(docsDir, f.name);
       if (method === 'symlink') {
         await Deno.symlink(resolve(f.path), dest);
       } else {
@@ -636,7 +636,7 @@ export async function compileToTarget(
       targetRoot,
       indexPath,
       index: indexText,
-      fragmentsWritten: selected.length,
+      docsWritten: selected.length,
       action: method === 'symlink' ? 'symlinked' : 'copied',
     };
   } catch (error) {
@@ -646,7 +646,7 @@ export async function compileToTarget(
       targetRoot,
       indexPath,
       index: indexText,
-      fragmentsWritten: 0,
+      docsWritten: 0,
       action: 'failed',
       reason: message,
     };
@@ -719,7 +719,7 @@ export async function syncDocs(
         method: options.method,
         dryRun: options.dryRun,
         stdout: options.stdout,
-        fragments: entry.fragments,
+        files: entry.files,
       }),
     })),
   );
@@ -743,8 +743,8 @@ export function formatCompileSummary(
     return `${yellow('⚠ Skipped')} ${magenta(project)} ${dim(italic(`(${result.reason ?? ''})`))}`;
   }
   const verb = result.action === 'symlinked' ? 'symlinked' : 'copied';
-  return `${green('✨ Compiled')} ${magenta(project)} → ${indexFilename} + ${result.fragmentsWritten} fragment${
-    result.fragmentsWritten === 1 ? '' : 's'
+  return `${green('✨ Compiled')} ${magenta(project)} → ${indexFilename} + ${result.docsWritten} doc${
+    result.docsWritten === 1 ? '' : 's'
   } ${dim(italic(`(${verb} to ${targetSubdir})`))}`;
 }
 

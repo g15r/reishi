@@ -1,7 +1,7 @@
 /**
  * Tests for docs.ts — list/add/remove against isolated envs, index
  * compilation with frontmatter/priority/token budget handling, and target
- * distribution of fragments. Full CLI sync wiring lives alongside its
+ * distribution of docs. Full CLI sync wiring lives alongside its
  * objective's commit.
  */
 
@@ -15,9 +15,9 @@ import {
   compileIndex,
   compileToTarget,
   getDocProjectNames,
-  getFragmentNames,
+  getDocNames,
   listDocProjects,
-  listFragments,
+  listDocs,
   normalizeProjectPath,
   syncDocs,
 } from './docs.ts';
@@ -75,8 +75,8 @@ async function seedDocsSource(env: IsolatedEnv): Promise<void> {
         'api-conventions.md':
           '---\ndescription: API conventions for myproject-a.\npriority: 10\n---\n\n# API\n\nBody.\n',
         'testing.md': '# Testing\n\nRun tests in isolated temp dirs.\n',
-        // Nested fragment + dotfile: both must be ignored by listers.
-        'nested/ignored.md': 'nested fragments are not supported in v1',
+        // Nested doc + dotfile: both must be ignored by listers.
+        'nested/ignored.md': 'nested docs are not supported in v1',
       },
       'myproject-b': {
         'deploy.md': '# Deploy\n\nTag and ship.\n',
@@ -87,7 +87,7 @@ async function seedDocsSource(env: IsolatedEnv): Promise<void> {
 }
 
 // ============================================================================
-// listDocProjects / listFragments
+// listDocProjects / listDocs
 // ============================================================================
 
 Deno.test('listDocProjects: empty source returns empty', async () => {
@@ -114,15 +114,15 @@ Deno.test('listDocProjects: returns subdirs, excludes dotfiles', async () => {
   }
 });
 
-Deno.test('listFragments: flat .md only, ignores nested dirs and dotfiles', async () => {
+Deno.test('listDocs: flat .md only, ignores nested dirs and dotfiles', async () => {
   const env = await setupIsolatedEnv();
   try {
     await withEnv(env.env, async () => {
       await seedDocsSource(env);
-      const fragments = await listFragments('myproject-a');
-      const names = fragments.map((f) => f.name).sort();
+      const docs = await listDocs('myproject-a');
+      const names = docs.map((f) => f.name).sort();
       assertEquals(names, ['api-conventions.md', 'testing.md']);
-      for (const f of fragments) {
+      for (const f of docs) {
         assert(f.size > 0);
       }
     });
@@ -131,19 +131,19 @@ Deno.test('listFragments: flat .md only, ignores nested dirs and dotfiles', asyn
   }
 });
 
-Deno.test('listFragments: missing project returns empty', async () => {
+Deno.test('listDocs: missing project returns empty', async () => {
   const env = await setupIsolatedEnv();
   try {
     await withEnv(env.env, async () => {
-      assertEquals(await listFragments('nonexistent'), []);
+      assertEquals(await listDocs('nonexistent'), []);
     });
   } finally {
     await env.cleanup();
   }
 });
 
-// Fragment-level add/remove tests retired in Phase 7: users manage fragment
-// files directly. Project-level CRUD lives in addDocProject/unlinkProject.
+// Doc-level add/remove tests retired in Phase 7: users manage doc files
+// directly. Project-level CRUD lives in addDocProject/unlinkProject.
 
 // ============================================================================
 // normalizeProjectPath — relative→abs, condense $HOME→~
@@ -237,13 +237,13 @@ Deno.test('addDocProject: relative target is normalized to ~/-prefixed when unde
 // Completion helpers
 // ============================================================================
 
-Deno.test('getDocProjectNames + getFragmentNames: return sorted names', async () => {
+Deno.test('getDocProjectNames + getDocNames: return sorted names', async () => {
   const env = await setupIsolatedEnv();
   try {
     await withEnv(env.env, async () => {
       await seedDocsSource(env);
       assertEquals(await getDocProjectNames(), ['myproject-a', 'myproject-b']);
-      assertEquals(await getFragmentNames('myproject-a'), [
+      assertEquals(await getDocNames('myproject-a'), [
         'api-conventions.md',
         'testing.md',
       ]);
@@ -257,7 +257,7 @@ Deno.test('getDocProjectNames + getFragmentNames: return sorted names', async ()
 // compileIndex
 // ============================================================================
 
-Deno.test('compileIndex: includes all fragments with descriptions', async () => {
+Deno.test('compileIndex: includes all docs with descriptions', async () => {
   const env = await setupIsolatedEnv();
   try {
     await withEnv(env.env, async () => {
@@ -324,7 +324,7 @@ Deno.test('compileIndex: token budget truncates and appends omitted line', async
   const env = await setupIsolatedEnv();
   try {
     await withEnv(env.env, async () => {
-      // Tight budget — smaller than one fragment section costs.
+      // Tight budget — smaller than one doc section costs.
       await patchConfig(env.configPath, {
         docs: {
           source: env.docsDir,
@@ -335,16 +335,16 @@ Deno.test('compileIndex: token budget truncates and appends omitted line', async
       });
       resetPathCache();
 
-      const fragments: Record<string, string> = {};
+      const docs: Record<string, string> = {};
       for (const name of ['a.md', 'b.md', 'c.md']) {
-        fragments[name] =
+        docs[name] =
           `---\ndescription: ${name} description with enough text to cost tokens.\n---\n\nbody\n`;
       }
-      await seedSourceDir(env, { docs: { proj: fragments } });
+      await seedSourceDir(env, { docs: { proj: docs } });
       const index = await compileIndex('proj', env.projectDir);
-      assertStringIncludes(index, 'more fragment');
+      assertStringIncludes(index, 'more doc');
       assertStringIncludes(index, 'omitted');
-      // At least one section must still appear — we always include one fragment
+      // At least one section must still appear — we always include one doc
       // even if it alone exceeds the budget.
       assertStringIncludes(index, '## a.md');
     });
@@ -353,13 +353,13 @@ Deno.test('compileIndex: token budget truncates and appends omitted line', async
   }
 });
 
-Deno.test('compileIndex: respects fragments filter', async () => {
+Deno.test('compileIndex: respects files filter', async () => {
   const env = await setupIsolatedEnv();
   try {
     await withEnv(env.env, async () => {
       await seedDocsSource(env);
       const index = await compileIndex('myproject-a', env.projectDir, {
-        fragments: ['api-conventions.md'],
+        files: ['api-conventions.md'],
       });
       assertStringIncludes(index, '## api-conventions.md');
       assert(!index.includes('## testing.md'));
@@ -373,14 +373,14 @@ Deno.test('compileIndex: respects fragments filter', async () => {
 // compileToTarget
 // ============================================================================
 
-Deno.test('compileToTarget: writes index + fragments to target dir', async () => {
+Deno.test('compileToTarget: writes index + docs to target dir', async () => {
   const env = await setupIsolatedEnv();
   try {
     await withEnv(env.env, async () => {
       await seedDocsSource(env);
       const result = await compileToTarget('myproject-a', env.projectDir);
       assertEquals(result.action, 'copied');
-      assertEquals(result.fragmentsWritten, 2);
+      assertEquals(result.docsWritten, 2);
 
       const indexPath = join(env.projectDir, 'AGENTS.md');
       assert(await exists(indexPath));
@@ -448,13 +448,13 @@ Deno.test('compileToTarget: symlink mode links back to absolute source', async (
   }
 });
 
-Deno.test('compileToTarget: re-compile clears stale fragments', async () => {
+Deno.test('compileToTarget: re-compile clears stale docs', async () => {
   const env = await setupIsolatedEnv();
   try {
     await withEnv(env.env, async () => {
       await seedDocsSource(env);
       await compileToTarget('myproject-a', env.projectDir);
-      // Delete one fragment directly, then re-compile.
+      // Delete one doc directly, then re-compile.
       await Deno.remove(join(env.docsDir, 'myproject-a', 'testing.md'));
       await compileToTarget('myproject-a', env.projectDir);
       const staleCopy = join(env.projectDir, '.agents', 'docs', 'testing.md');
@@ -497,7 +497,7 @@ Deno.test('syncDocs: compiles and writes to configured target', async () => {
   }
 });
 
-Deno.test('syncDocs: fragments filter limits what gets distributed', async () => {
+Deno.test('syncDocs: files filter limits what gets distributed', async () => {
   const env = await setupIsolatedEnv();
   try {
     await withEnv(env.env, async () => {
@@ -511,7 +511,7 @@ Deno.test('syncDocs: fragments filter limits what gets distributed', async () =>
         projects: {
           'myproject-a': {
             path: env.projectDir,
-            fragments: ['api-conventions.md'],
+            files: ['api-conventions.md'],
           },
         },
       });

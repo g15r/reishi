@@ -407,8 +407,8 @@ export interface CompiledIndexExpectations {
   containsAll?: string[];
   /** Substrings that MUST NOT appear. */
   excludes?: string[];
-  /** Required fragment links (matches `](./<name>)` in the linked-fragments list). */
-  fragments?: string[];
+  /** Required doc links (matches `](./<name>)` in the references list). */
+  indexRefs?: string[];
 }
 
 /**
@@ -429,11 +429,11 @@ export function assertCompiledIndexMatches(
   for (const s of expected.excludes ?? []) {
     assert(!actual.includes(s), `compiled index unexpectedly contains: ${s}`);
   }
-  for (const fragment of expected.fragments ?? []) {
-    const needle = `](./${fragment})`;
+  for (const ref of expected.indexRefs ?? []) {
+    const needle = `](./${ref})`;
     assert(
-      actual.includes(needle) || actual.includes(`./${fragment}\n`),
-      `compiled index missing fragment link: ${fragment}`,
+      actual.includes(needle) || actual.includes(`./${ref}\n`),
+      `compiled index missing doc link: ${ref}`,
     );
   }
 }

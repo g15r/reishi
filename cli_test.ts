@@ -896,7 +896,7 @@ Deno.test('cli: rules compile writes <rules.source>/AGENTS.md', async () => {
   }
 });
 
-Deno.test('cli: docs move renames a fragment', async () => {
+Deno.test('cli: docs move renames a doc', async () => {
   const t = await freshEnv();
   try {
     const projectDir = join(t.docsDir, 'p');
@@ -910,7 +910,7 @@ Deno.test('cli: docs move renames a fragment', async () => {
   }
 });
 
-Deno.test('cli: docs remove deletes a fragment', async () => {
+Deno.test('cli: docs remove deletes a doc', async () => {
   const t = await freshEnv();
   try {
     const projectDir = join(t.docsDir, 'p');

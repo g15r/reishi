@@ -64,10 +64,10 @@ export interface DocsProjectEntry {
   /** Absolute or `~`-prefixed path to the project root. */
   path: string;
   /**
-   * Restrict compiled output to this subset of fragment filenames (basenames
-   * in the project's docs.source dir). Undefined = all fragments.
+   * Restrict compiled output to this subset of doc filenames (basenames
+   * in the project's docs.source dir). Undefined = all docs in the project.
    */
-  fragments?: string[];
+  files?: string[];
 }
 
 export interface DocsConfig {
@@ -458,9 +458,11 @@ const EXAMPLE_TEMPLATE_COMMENTED = `# example_config.toml — reference template
 # avoid being mistaken for real settings.
 #
 # Vocabulary cheat sheet:
-#   fragment  — any single markdown file reishi manages
+#   rule      — an always-on markdown file under rules.source
+#   doc       — a project-scoped markdown file under docs.source/<project>/
+#   skill     — a directory under skills.source with SKILL.md + supporting files
 #   source    — where you author content (this directory's siblings)
-#   target    — where reishi syncs fragments (agents and projects)
+#   target    — where reishi syncs (agents and projects)
 #   sync      — local-only write from source to targets
 #   pull      — fetch fresh content from a remote (only for tracked skills)
 #   remote    — the upstream location of a tracked skill (a GitHub repo)
@@ -540,10 +542,10 @@ rules = "~/.claude/rules"
 # ----------------------------------------------------------
 
 [docs]
-# Where you author doc fragments, organized by project subdirectory.
+# Where you author docs, organized by project subdirectory.
 source = "~/.config/reishi/docs"
 
-# Where fragments land inside a project, relative to the project root.
+# Where docs land inside a project, relative to the project root.
 default_target = ".agents/docs"
 
 # Filename of the compiled index that lands in the project root.
@@ -559,12 +561,12 @@ index_filename = "AGENTS.md"
 # Projects — named targets for docs
 # ----------------------------------------------------------
 
-# Each project maps a name to a project root on disk. \`fragments\` is
-# optional; when omitted, every fragment under <docs.source>/<name>/ is
+# Each project maps a name to a project root on disk. \`files\` is
+# optional; when omitted, every doc under <docs.source>/<name>/ is
 # included. Use \`rei docs add <name> --target <path>\` to create one.
 # [projects.example]
 # path = "/path/to/your/project"
-# fragments = ["api-conventions.md", "testing.md"]
+# files = ["api-conventions.md", "testing.md"]
 `;
 
 /**
