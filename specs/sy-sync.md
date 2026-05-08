@@ -2,7 +2,7 @@
 
 ## Goals
 
-`sy-` covers the cross-domain sync engine: how reishi distributes fragments from source to targets, how targets are addressed (named agents, named projects, the built-in shared agent), how sync method (copy vs symlink) is resolved, and how inspection modes (`--check`, `--dry-run`) work. This domain owns the contract that `skills sync`, `rules sync`, `docs sync`, and the top-level `rei sync` all participate in. It also owns the upcoming two-step compile orchestration and `clean_on_sync` orphan cleanup.
+`sy-` covers the cross-domain sync engine: how reishi distributes files from source to targets, how targets are addressed (named agents, named projects, the built-in shared agent), how sync method (copy vs symlink) is resolved, and how inspection modes (`--check`, `--dry-run`) work. This domain owns the contract that `skills sync`, `rules sync`, `docs sync`, and the top-level `rei sync` all participate in. It also owns the upcoming two-step compile orchestration and `clean_on_sync` orphan cleanup.
 
 **Non-goals.** Sync is local-only — no network. Pull (network) lives in `sk-`. The engine never edits source.
 
@@ -12,7 +12,7 @@
 
 - **sy-R001** — Target shapes: **agent targets** (named, hold `skills` + `rules` paths) and **project targets** (named, hold a project root for docs). Skills and rules sync to agents; docs sync to projects.
 - **sy-R002** — `[agents.<name>]` entries each carry a `skills` and a `rules` path key; either may point at any directory.
-- **sy-R003** — `[projects.<name>]` entries each carry a `path` (project root) and an optional `fragments` array.
+- **sy-R003** — `[projects.<name>]` entries each carry a `path` (project root) and an optional `files` array.
 - **sy-R004** — A built-in `shared` agent target points at `~/.agents/`. The path is fixed by convention; it is not configurable.
 - **sy-R005** — `shared` participates in sync only when the user sets `include_shared_agent = true` in config.
 - **sy-R006** — The reserved name `shared` cannot be used for a user-defined `[agents.<name>]` entry (see `cf-R013`).
@@ -43,7 +43,7 @@
   - Symlinks always report `stale: false` and `diverged: false` — they *are* the source.
   - Untracked skills (no lockfile entry) are never `diverged`.
 - **sy-R041** — `--check` never writes and never hits the network.
-- **sy-R042** — `rei rules sync --check` and `rei docs sync --check` report comparable per-fragment × per-target freshness.
+- **sy-R042** — `rei rules sync --check` and `rei docs sync --check` report comparable per-file × per-target freshness.
 - **sy-R043** — `rei skills pull --check` is the network counterpart — see `sk-R056`.
 
 ### Dry-run
@@ -68,7 +68,7 @@
 ### `clean_on_sync` (Phase 15)
 
 - **sy-R070** — Global `clean_on_sync` boolean (default `false`) opts in to orphan cleanup in copy targets.
-- **sy-R071** — An orphan is a file present in a target that has no corresponding source fragment. Only relevant for `copy` syncs; symlinks self-resolve when the source moves or is deleted.
+- **sy-R071** — An orphan is a file present in a target that has no corresponding source file. Only relevant for `copy` syncs; symlinks self-resolve when the source moves or is deleted.
 - **sy-R072** — During a sync run, orphans are collected across the whole run (every domain × every target) and presented in a single batched prompt at the end: `clean up 🧼: remove A, B, and C? (Y/n)`, default `Y`.
 - **sy-R073** — Under `--dry-run`, the prompt is skipped and orphans are reported as "would be cleaned" instead.
 - **sy-R074** — `clean_on_sync` only removes files that reishi would have written; it never removes user files outside the relevant target subtrees.

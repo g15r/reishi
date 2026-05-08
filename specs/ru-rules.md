@@ -2,7 +2,7 @@
 
 ## Goals
 
-`ru-` covers the rules surface: a flat folder of always-on markdown fragments at `rules.source` that gets synced to every configured agent's rules path. Rules are the simplest construct — no tracking, no frontmatter, no conditional activation, no remote source. Users manage the files directly with their editor or filesystem tools; reishi just lists, syncs, and (in upcoming work) compiles and renames them.
+`ru-` covers the rules surface: a flat folder of always-on markdown rules at `rules.source` that gets synced to every configured agent's rules path. Rules are the simplest construct — no tracking, no frontmatter, no conditional activation, no remote source. Users manage the files directly with their editor or filesystem tools; reishi just lists, syncs, and (in upcoming work) compiles and renames them.
 
 **Non-goals.** No remote fetching for rules; no per-rule frontmatter or activation rules; no per-rule overrides. Rules apply globally.
 
@@ -15,7 +15,7 @@
 
 ### `rei rules list`
 
-- **ru-R010** — `rei rules list` (alias `ls`) lists every rule fragment under `rules.source`.
+- **ru-R010** — `rei rules list` (alias `ls`) lists every rule under `rules.source`.
 
 ### `rei rules sync`
 
@@ -34,5 +34,5 @@
 
 ### Compile (Phase 14)
 
-- **ru-R040** — `rei rules compile` concatenates every fragment in `<rules.source>/` into a single compiled markdown file written *into source* (so it is git-trackable and visible to the user). No index — well-formatted concatenation.
+- **ru-R040** — `rei rules compile` concatenates every rule in `<rules.source>/` into a single compiled markdown file written *into source* (so it is git-trackable and visible to the user). No index — well-formatted concatenation.
 - **ru-R041** — The compiled file is the artifact `sync` ships when an agent target opts in to compilation (see `sy-R060+`).

@@ -15,9 +15,12 @@ When the spec and TODO disagree, the spec wins. If you discover a missing requir
 
 ## Vocabulary
 
-Canonical six-word glossary — keep CLI output, errors, and docs consistent with this:
+Canonical glossary — keep CLI output, errors, and docs consistent with this:
 
-- **fragment** — any single markdown file reishi manages
+- **markdown file** — the unit of content reishi manages; say *file* in prose, *rule*/*doc*/*skill* when domain matters
+- **rule** — a markdown file under `rules.source`; always-on agent context
+- **doc** — a markdown file under `docs.source/<project>/`; project-scoped, compiled into a per-project index
+- **skill** — a directory under `skills.source` with `SKILL.md` plus optional supporting files; conditionally activated
 - **source** — `~/.config/reishi/` (default); always authoritative
 - **target** — agents (skills + rules) and projects (docs)
 - **sync** — local-only write, source → targets
@@ -33,7 +36,7 @@ Canonical six-word glossary — keep CLI output, errors, and docs consistent wit
 | `paths.ts` | Source-dir resolvers, cached per session |
 | `sync.ts` | Sync engine, pull, prefix-change, orphan walk, skill move/remove |
 | `rules.ts` | Rules CRUD + sync + `compileRules` |
-| `docs.ts` | Fragments + index compilation + project-level CRUD + `compileDocsToSource` |
+| `docs.ts` | Doc files + index compilation + project-level CRUD + `compileDocsToSource` |
 | `test-helpers.ts` | `setupIsolatedEnv`, `makeFixtureTarball`, `fakeFetchGithub` |
 | `assets/` | Skill scaffold templates (embedded via `deno compile --include`) |
 | `scripts/compile-all.sh` | Cross-compile to `{os}-{arch}` |
@@ -95,7 +98,7 @@ rules = "~/.claude/rules"
 
 [projects.myproject]
 path = "~/code/myproject"
-# fragments = ["api-conventions.md", "testing.md"]   # subset filter
+# files = ["api-conventions.md", "testing.md"]   # subset filter
 
 # Per-skill overrides (optional)
 [skill_overrides.book-review]
@@ -144,8 +147,8 @@ Compile generates a source-side artifact that sync ships as-is — git-trackable
 
 Independent operations fan out via `Promise.all`:
 - `syncAll` per-skill, `syncSkill` per-target, `unsyncSkill` per-target
-- `syncDocs` per-project, `compileToTarget` per-fragment write
-- `compileRules` fragment reads
+- `syncDocs` per-project, `compileToTarget` per-file write
+- `compileRules` per-rule reads
 - `findOrphans` per-agent
 - `checkForUpdates` per-skill HEAD probe
 - top-level `rei sync` runs skills/rules/docs in parallel
@@ -164,7 +167,7 @@ deno task test:sync-prefix         # prefix-change flows
 deno task test:add                 # add command integration
 deno task test:updates             # update polling
 deno task test:rules               # rules list/sync
-deno task test:docs                # docs fragments + index compilation
+deno task test:docs                # docs + index compilation
 deno task test:move-remove         # Phase 13 source-side CRUD
 deno task test:phase14             # rules+docs compile, agent compile opt-in
 deno task test:clean-on-sync       # orphan walk + cleanup

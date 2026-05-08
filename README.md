@@ -4,7 +4,7 @@
 
 Reishi (霊芝[^1]) is a small CLI that manages markdown context for agents — specifically rules, skills, and project docs — from a single source of truth. It takes a modular, curator-style approach to this work — emphasizing simplicity, a clear mental model, and a delightful command line experience.
 
-You edit fragments (tightly-scoped markdown files), which reishi then composes and syncs based on deeply configurable preferences (with opinionated defaults for folks who would rather their agents Just Work Better). Fragments can be composed into 3 constructs:
+You edit tightly-scoped markdown files, which reishi composes and syncs based on deeply configurable preferences (with opinionated defaults for folks who would rather their agents Just Work Better). Those files take three shapes:
 
 - always-on _rules_
 - conditionally-activated _skills_
@@ -51,11 +51,13 @@ rei config init
 
 ## Core concepts
 
-Reishi has an intentionally small vocabulary. Six words cover everything, and clarity of mental model is a top priority.
+Reishi has an intentionally small vocabulary. Clarity of mental model is a top priority.
 
 | Term | Meaning |
 | ------------ | ------------------------------------------------------------------------- |
-| **fragment** | A single reishi-managed markdown file. |
+| **rule** | An always-on markdown file under `rules.source`. |
+| **doc** | A project-scoped markdown file under `docs.source/<project>/`, compiled into a per-project index. |
+| **skill** | A directory under `skills.source` with `SKILL.md` plus optional supporting files; conditionally activated. |
 | **source** | The directory where you author content (`~/.config/reishi/` by default). |
 | **target** | Where reishi writes — there are two types: agents (for skills + rules) or projects (for docs). |
 | **sync** | Local-only write (or symlink) from source to targets. Always safe. |
@@ -120,7 +122,7 @@ A handful of patterns the tool is designed for.
 
 ### Promote freely between constructs
 
-A skill you use every session is probably a rule. A rule that only applies to one codebase is probably a doc fragment. The constructs are deliberately parallel — every domain has `move`/`mv` and `remove`/`rm` on the source side, so promoting between roles is a rename and a re-sync.
+A skill you use every session is probably a rule. A rule that only applies to one codebase is probably a doc. The constructs are deliberately parallel — every domain has `move`/`mv` and `remove`/`rm` on the source side, so promoting between roles is a rename and a re-sync.
 
 ### Track skills you didn't write
 
@@ -132,7 +134,7 @@ The built-in `shared` agent target points at `~/.agents/`. Tools that read the [
 
 ### Per-project docs, compiled into one index
 
-Each subdirectory of `docs.source` is a project. Each `.md` file inside is a fragment. `rei docs sync` compiles the fragments into a token-budgeted `AGENTS.md` index that lands in the project root, with the fragments themselves under `.agents/docs/`. Agents read the index, then look up the specific fragment they need.
+Each subdirectory of `docs.source` is a project. Each `.md` file inside is a doc. `rei docs sync` compiles the docs into a token-budgeted `AGENTS.md` index that lands in the project root, with the doc files themselves under `.agents/docs/`. Agents read the index, then look up the specific doc they need.
 
 ### Symlink while authoring, copy when stable
 
@@ -150,8 +152,8 @@ network operation is `rei skills pull`, which exists exactly because remote skil
 - **No registry, no marketplace.** Skills are GitHub repos, full stop. Tracking is opt-in and reversible. There is no central index reishi can censor, throttle, or charge you for. You probably have the problem of too many skills to consider, so we're not worried about discovery.
 - **Divergence protection over conflict prompts.** When local and remote
 both moved, reishi keeps both — your version in place, the remote's as `<filename>_1.md` — and lets you resolve at your pace.
-- **Six-word vocabulary.** Fragment, source, target, sync, pull, remote.
-Every command, every error, every doc uses the same six words.
+- **Tiny vocabulary.** Rule, doc, skill, source, target, sync, pull, remote.
+Every command, every error, every doc uses the same handful of words.
 
 ## Issues vs. Discussions
 

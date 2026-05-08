@@ -1,29 +1,29 @@
 # reishi TODO
 
-## Phase 16: Compiled index core fragment
+## Phase 16: Compiled index core
 **Requirements**: dc-R090, dc-R091, dc-R092, dc-R093, dc-R094, dc-R095, dc-R096, cf-R011, dev-R070
 
-### Compiler core-fragment detection and emission
-- [ ] Detect filename match against `[docs].index_filename` (case-insensitive) when reading project fragments
-- [ ] Strip frontmatter from core content before emission
-- [ ] Exclude core fragment from the linked-fragments list
+### Compiler index-core detection and emission
+- [ ] Detect filename match against `[docs].index_filename` (case-insensitive) when reading project markdown files
+- [ ] Strip frontmatter from index-core content before emission
+- [ ] Exclude the index core from the references list
 - [ ] Fail with a clear error on case-collision matches
 
 ### Compiled-output formatting
-- [ ] Emit core content first, then `## Modular docs` heading, then linked-fragments list
-- [ ] Apply token-budget trimming only to the linked-fragments section
-- [ ] Preserve link-only output when no core fragment exists
+- [ ] Emit index-core content first, then `## References` heading, then references list
+- [ ] Apply token-budget trimming only to the references section
+- [ ] Preserve link-only output when no index core exists
 
 ### Core-size warning
 - [ ] Add `[docs].core_warn_tokens` to `ConfigSchema` (default `4000`)
-- [ ] Token-count the core fragment during compile and emit a soft warning above threshold
+- [ ] Token-count the index core during compile and emit a soft warning above threshold
 - [ ] Warning text invites modularization and includes the reishi progressive-disclosure docs link (placeholder until reishi-docs lands)
 
 ### Tests
 - [ ] Unit: case-insensitive match, collision error, no-core fallback, frontmatter stripped
-- [ ] Unit: token-budget trims links only, core always full
+- [ ] Unit: token-budget trims references only, index core always full
 - [ ] Unit: warn fires above threshold, silent at and below
-- [ ] Snapshot (`@std/testing/snapshot`): compiled-index full output for {core-only, links-only, both, token-trimmed} fixtures — substring assertions remain only for one-line invariants
+- [ ] Snapshot (`@std/testing/snapshot`): compiled-index full output for {core-only, references-only, both, token-trimmed} fixtures — substring assertions remain only for one-line invariants
 
 ## Phase 17: Target overwrite protection
 **Requirements**: dc-R100, dc-R101, dc-R102, dc-R103, dc-R104
@@ -46,14 +46,14 @@
 ## Phase 18: Heterogeneous doc import on project link
 **Requirements**: dc-R110, dc-R111, dc-R112, dc-R113, dc-R114, dc-R115, dc-R116, dc-R117, dc-R118, cf-R047
 
-### Scoop scanner
-- [ ] Implement default-pattern matcher across top-level files and recursive scoop dirs
+### Discovery scanner
+- [ ] Implement default-pattern matcher across top-level files and recursive discovery dirs
 - [ ] Read-only target traversal — never modify target during scan
-- [ ] Return a structured list of `(source path → proposed fragment name)`
+- [ ] Return a structured list of `(source path → proposed file name)`
 
 ### Name flattening and collision handling
 - [ ] Top-level: keep stem; nested: `<dir>-<stem>.md`
-- [ ] Index-filename match preserved as-is so it lands as the core fragment
+- [ ] Index-filename match preserved as-is so it lands as the index core
 - [ ] Numeric suffixes for in-import name collisions
 
 ### Link-command integration
@@ -62,13 +62,13 @@
 - [ ] Interactive prompt when files detected and source dir empty (use the existing injectable-callback pattern, R007)
 - [ ] Print per-file summary on completion
 - [ ] Backup target index file (delegate to the Phase 17 backup helper)
-- [ ] Refuse import with a clear error when source dir already has fragments
+- [ ] Refuse import with a clear error when source dir already has docs
 
 ### Tests
 - [ ] Fixtures: heterogeneous source layouts (claude-only, cursor-only, mixed, AGENTS-only, none)
 - [ ] Empty target → no prompt, link completes cleanly
 - [ ] Non-empty source dir → import refuses with the right error
-- [ ] Index-filename match → core fragment placed in source under exact filename
+- [ ] Index-filename match → index core placed in source under exact filename
 - [ ] Backup writes the original target index before link completes
 - [ ] `--no-import` and `--import` both bypass the interactive prompt
 

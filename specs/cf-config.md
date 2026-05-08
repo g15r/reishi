@@ -21,10 +21,10 @@
 ### Schema — config
 
 - **cf-R010** — Top-level keys: `sync_method` (`"copy"` | `"symlink"`), `default_prefix` (`"infer"` | `"none"`), `prefix_separator` (string, default `"_"`), `include_shared_agent` (bool, default `false` in defaults but `true` in `init` output).
-- **cf-R011** — `[skills]` table holds `source` (path); `[rules]` table holds `source` and optional `sync_method` override; `[docs]` table holds `source`, `default_target`, `index_filename`, optional `sync_method`, optional `token_budget`, optional `core_warn_tokens` (default `4000`; soft-warns when a core fragment exceeds the threshold — see `dc-R095`).
+- **cf-R011** — `[skills]` table holds `source` (path); `[rules]` table holds `source` and optional `sync_method` override; `[docs]` table holds `source`, `default_target`, `index_filename`, optional `sync_method`, optional `token_budget`, optional `core_warn_tokens` (default `4000`; soft-warns when an index core exceeds the threshold — see `dc-R095`).
 - **cf-R012** — `[updates]` table holds `enabled` (bool) and `interval_hours` (number).
 - **cf-R013** — `[agents.<name>]` tables each hold `skills` and `rules` path keys; the name `shared` is reserved and rejected on write (use `include_shared_agent`).
-- **cf-R014** — `[projects.<name>]` tables hold `path` (project root) and optional `fragments` array; paths are normalized on write (expand `~`, condense back to `~/` for storage).
+- **cf-R014** — `[projects.<name>]` tables hold `path` (project root) and optional `files` array (subset of doc files to compile, by basename); paths are normalized on write (expand `~`, condense back to `~/` for storage).
 - **cf-R015** — `[skill_overrides.<name>]` tables hold per-skill preference overrides: `sync_method`, `agents` (list of agent names to limit sync), `updates` (bool to disable polling for that skill).
 
 ### Schema — lockfile

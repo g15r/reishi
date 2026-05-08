@@ -10,7 +10,10 @@ reishi is an agent context manager. It treats every form of agent context — al
 
 Canonical terms — keep these consistent across CLI output, errors, docs, and tests:
 
-- **Fragment** — any individual markdown file reishi manages (a rule file, a doc file, a `SKILL.md`).
+- **Markdown file** — the unit of content reishi manages. Most are plain `.md` files; a skill is a directory containing a `SKILL.md` plus optional supporting files. Say *file* in prose; reach for *rule*, *doc*, or *skill* when the domain matters.
+- **Rule** — a markdown file under `rules.source`; always-on agent context.
+- **Doc** — a markdown file under `docs.source/<project>/`; project-scoped context, compiled into a per-project index.
+- **Skill** — a directory under `skills.source` containing `SKILL.md` plus optional supporting files; conditionally activated agent context.
 - **Source** — `~/.config/reishi/` by default. Where users edit. Always authoritative.
 - **Target** — anywhere reishi writes to. Two shapes: **agents** (named, group `skills` + `rules` paths) and **projects** (named, hold a project root for docs).
 - **Shared agent** — built-in agent target fixed at `~/.agents/`, opt-in via `include_shared_agent`. Path is not configurable.
@@ -62,9 +65,9 @@ Future requirements, open questions, and big ideas. Not active work — promote 
 
 ### Cross-domain external-source adoption
 
-A consistent way to safely pull external file changes back into reishi source — across rules, docs, and skills. Today, `skills pull` handles remote → source with mtime/`synced_at` divergence protection, and the Phase 18 docs import handles a one-shot scoop at project-link time. Nothing covers "the user edited the target directly and wants those edits flowing back to source," nor re-importing project context after the initial link. Needs deep thought before scoping — it opens up diffing, conflict UX, and the question of whether sync becomes bidirectional. Open questions:
+A consistent way to safely pull external file changes back into reishi source — across rules, docs, and skills. Today, `skills pull` handles remote → source with mtime/`synced_at` divergence protection, and the Phase 18 docs import handles a one-shot discovery + import at project-link time. Nothing covers "the user edited the target directly and wants those edits flowing back to source," nor re-importing project context after the initial link. Needs deep thought before scoping — it opens up diffing, conflict UX, and the question of whether sync becomes bidirectional. Open questions:
 
-- Diffing model — show the user a per-fragment diff before merging, or batch them?
+- Diffing model — show the user a per-file diff before merging, or batch them?
 - Conflict mode — how do we surface ambiguous cases (target edited *and* source edited since last sync)?
 - Scope — bidirectional sync, or strictly target-to-source pull?
 - Surface — `rei <domain> reverse-sync`? `rei adopt`? Single top-level command with `--from-target`?
