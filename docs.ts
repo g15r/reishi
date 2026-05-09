@@ -20,7 +20,7 @@
 
 import { parse as parseYAML } from '@std/yaml';
 import { dirname, extname, join, relative, resolve } from '@std/path';
-import { copy, exists } from '@std/fs';
+import { exists } from '@std/fs';
 import { dim, green, italic, magenta, red, yellow } from '@std/fmt/colors';
 import { isAbsolute, resolve as resolvePath } from '@std/path';
 import {
@@ -436,7 +436,7 @@ function approxTokens(text: string): number {
  */
 export async function compileIndex(
   project: string,
-  targetDir: string,
+  _targetDir: string,
   options: { files?: string[] } = {},
 ): Promise<string> {
   const config = await loadConfig();

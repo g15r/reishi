@@ -12,18 +12,13 @@ import { parse as parseTOML } from '@std/toml';
 import { join } from '@std/path';
 import { exists } from '@std/fs';
 import { addSkill } from './reishi.ts';
-import type { ConfigSchema, LockfileSchema } from './config.ts';
+import type { LockfileSchema } from './config.ts';
 import {
   fakeFetchGithub,
   type IsolatedEnv,
   seedRemoteRepo,
   setupIsolatedEnv,
 } from './test-helpers.ts';
-
-async function readConfig(path: string): Promise<ConfigSchema> {
-  const text = await Deno.readTextFile(path);
-  return parseTOML(text) as unknown as ConfigSchema;
-}
 
 async function readLockfile(path: string): Promise<LockfileSchema> {
   if (!(await exists(path))) return { skills: {} };

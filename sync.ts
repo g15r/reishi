@@ -84,11 +84,11 @@ interface ResolvedTarget {
  *
  * Extracts the `skills` path from each agent config entry.
  */
-async function resolveSkillTargets(
+function resolveSkillTargets(
   skillEntry: { agents?: string[] } | undefined,
   filterAgents: string[] | undefined,
   allAgents: Record<string, AgentConfig>,
-): Promise<ResolvedTarget[]> {
+): ResolvedTarget[] {
   const allowed = skillEntry?.agents;
   const out: ResolvedTarget[] = [];
   for (const [name, agent] of Object.entries(allAgents)) {
@@ -191,7 +191,7 @@ export async function syncSkill(
     }
   }
 
-  const targets = await resolveSkillTargets(configEntry, options.agents, refreshed.agents);
+  const targets = resolveSkillTargets(configEntry, options.agents, refreshed.agents);
   if (targets.length === 0) return [];
 
   const method = resolveMethod(refreshed.sync_method, configEntry?.sync_method, options.method);
@@ -296,7 +296,7 @@ export async function unsyncSkill(
 ): Promise<SyncResult[]> {
   const config = await loadConfig();
   const entry = config.skill_overrides?.[skillName];
-  const targets = await resolveSkillTargets(entry, options.agents, config.agents);
+  const targets = resolveSkillTargets(entry, options.agents, config.agents);
   const results: SyncResult[] = [];
 
   // Each agent target is independent — remove in parallel.
@@ -395,7 +395,7 @@ export async function syncStatus(): Promise<SkillStatus[]> {
     const syncedAt = lockEntry?.synced_at ? Date.parse(lockEntry.synced_at) : 0;
     const sourceMtime = await newestFileMtime(skillSource);
     const diverged = syncedAt > 0 && sourceMtime > syncedAt;
-    const targets = await resolveSkillTargets(configEntry, undefined, config.agents);
+    const targets = resolveSkillTargets(configEntry, undefined, config.agents);
 
     for (const target of targets) {
       const targetPath = join(target.path, name);

@@ -278,8 +278,8 @@ Deno.test('prefix change (prompt confirms rename): renames via injected prompt',
 
       const result = await pullSkill(oldName, {
         fetcher: fakeFetchGithub(tarball),
-        promptYesNo: async () => true,
-        promptChoice: async () => 'r', // rename
+        promptYesNo: () => Promise.resolve(true),
+        promptChoice: () => Promise.resolve('r'), // rename
       });
 
       const newName = 'readwise_book-review';
@@ -323,8 +323,8 @@ Deno.test('prefix change (prompt confirms parallel): installs alongside via inje
 
       await pullSkill(oldName, {
         fetcher: fakeFetchGithub(tarball),
-        promptYesNo: async () => true,
-        promptChoice: async () => 'p', // parallel
+        promptYesNo: () => Promise.resolve(true),
+        promptChoice: () => Promise.resolve('p'), // parallel
       });
 
       const newName = 'readwise_book-review';
@@ -359,7 +359,7 @@ Deno.test('prefix change (prompt declines): aborts via injected prompt', async (
       });
 
       const results = await syncSkill(oldName, {
-        promptYesNo: async () => false,
+        promptYesNo: () => Promise.resolve(false),
       });
       assert(results.length === 1);
       assertEquals(results[0].action, 'failed');

@@ -53,6 +53,7 @@ const enc = new TextEncoder();
 const write = (s: string) => Deno.stdout.writeSync(enc.encode(s));
 const isTTY = Deno.stdout.isTerminal();
 
+// deno-lint-ignore no-control-regex
 const ANSI_RE = /\x1b\[[0-9;]*m/g;
 const strip = (s: string) => s.replace(ANSI_RE, '');
 
