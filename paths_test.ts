@@ -36,7 +36,8 @@ async function withConfig(
 Deno.test('getSourceDir returns the path from REISHI_CONFIG-overridden config', async () => {
   await withConfig(
     {
-      skills: { source: '/tmp/custom-reishi-source' }, agents: {},
+      skills: { source: '/tmp/custom-reishi-source' },
+      agents: {},
     },
     async () => {
       assertEquals(await getSourceDir(), '/tmp/custom-reishi-source');
@@ -47,7 +48,8 @@ Deno.test('getSourceDir returns the path from REISHI_CONFIG-overridden config', 
 Deno.test('getDeactivatedDir is _deactivated under source', async () => {
   await withConfig(
     {
-      skills: { source: '/tmp/custom-reishi-source' }, agents: {},
+      skills: { source: '/tmp/custom-reishi-source' },
+      agents: {},
     },
     async () => {
       assertEquals(
@@ -61,7 +63,8 @@ Deno.test('getDeactivatedDir is _deactivated under source', async () => {
 Deno.test('getSourceDir expands leading ~ against HOME', async () => {
   await withConfig(
     {
-      skills: { source: '~/custom-skills' }, agents: {},
+      skills: { source: '~/custom-skills' },
+      agents: {},
     },
     async (home) => {
       assertEquals(await getSourceDir(), join(home, 'custom-skills'));

@@ -441,9 +441,7 @@ export async function compileIndex(
 ): Promise<string> {
   const config = await loadConfig();
   const all = await listDocs(project);
-  const filtered = options.files
-    ? all.filter((f) => options.files!.includes(f.name))
-    : all;
+  const filtered = options.files ? all.filter((f) => options.files!.includes(f.name)) : all;
   const parsed = await Promise.all(filtered.map(parseDoc));
   // Priority descending, then alphabetical by filename.
   parsed.sort((a, b) => {
@@ -562,9 +560,7 @@ export async function compileToTarget(
   const docsDir = join(targetRoot, config.docs.default_target);
 
   const allDocs = await listDocs(project);
-  const selected = options.files
-    ? allDocs.filter((f) => options.files!.includes(f.name))
-    : allDocs;
+  const selected = options.files ? allDocs.filter((f) => options.files!.includes(f.name)) : allDocs;
 
   if (options.dryRun) {
     return {
@@ -737,14 +733,17 @@ export function formatCompileSummary(
   targetSubdir: string,
 ): string {
   if (result.action === 'failed') {
-    return `${red('❌ Compile failed')} ${magenta(project)} ${dim(italic(`(${result.reason ?? ''})`))}`;
+    return `${red('❌ Compile failed')} ${magenta(project)} ${
+      dim(italic(`(${result.reason ?? ''})`))
+    }`;
   }
   if (result.action === 'skipped') {
     return `${yellow('⚠ Skipped')} ${magenta(project)} ${dim(italic(`(${result.reason ?? ''})`))}`;
   }
   const verb = result.action === 'symlinked' ? 'symlinked' : 'copied';
-  return `${green('✨ Compiled')} ${magenta(project)} → ${indexFilename} + ${result.docsWritten} doc${
-    result.docsWritten === 1 ? '' : 's'
-  } ${dim(italic(`(${verb} to ${targetSubdir})`))}`;
+  return `${green('✨ Compiled')} ${
+    magenta(project)
+  } → ${indexFilename} + ${result.docsWritten} doc${result.docsWritten === 1 ? '' : 's'} ${
+    dim(italic(`(${verb} to ${targetSubdir})`))
+  }`;
 }
-

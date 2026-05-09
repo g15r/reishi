@@ -11,11 +11,7 @@ import { parse as parseTOML, stringify as stringifyTOML } from '@std/toml';
 import type { LockfileSchema, SkillLockEntry } from './config.ts';
 import { resetPathCache } from './paths.ts';
 import { pullSkill, syncSkill } from './sync.ts';
-import {
-  fakeFetchGithub,
-  seedRemoteRepo,
-  setupIsolatedEnv,
-} from './test-helpers.ts';
+import { fakeFetchGithub, seedRemoteRepo, setupIsolatedEnv } from './test-helpers.ts';
 
 async function withEnv(
   env: Record<string, string>,

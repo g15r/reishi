@@ -128,9 +128,7 @@ Deno.test('shared agent: skills sync also lands in ~/.agents/skills when opted i
       const sharedHits = results.filter((r) => r.target === 'shared');
       assert(
         sharedHits.length > 0,
-        `expected at least one shared sync result; got ${
-          results.map((r) => r.target).join(', ')
-        }`,
+        `expected at least one shared sync result; got ${results.map((r) => r.target).join(', ')}`,
       );
       assert(await exists(join(env.home, '.agents', 'skills', 'demo', 'SKILL.md')));
     });

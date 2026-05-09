@@ -109,7 +109,10 @@ Deno.test('saveConfig then loadConfig round-trips fidelity', async () => {
     const cfg = defaultConfig();
     cfg.sync_method = 'symlink';
     cfg.updates.interval_hours = 12;
-    cfg.agents = { claude: { skills: '~/.claude/skills', rules: '~/.claude/rules' }, agents: { skills: '~/.agents/skills', rules: '~/.agents/rules' } };
+    cfg.agents = {
+      claude: { skills: '~/.claude/skills', rules: '~/.claude/rules' },
+      agents: { skills: '~/.agents/skills', rules: '~/.agents/rules' },
+    };
     await saveConfig(cfg);
     const loaded = await loadConfig();
     assertEquals(loaded.sync_method, 'symlink');

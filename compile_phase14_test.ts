@@ -12,12 +12,7 @@ import { join } from '@std/path';
 import { exists } from '@std/fs';
 import { parse as parseTOML, stringify as stringifyTOML } from '@std/toml';
 import { resetPathCache } from './paths.ts';
-import {
-  compileRules,
-  COMPILED_RULES_FILENAME,
-  resolveCompileTarget,
-  syncRules,
-} from './rules.ts';
+import { COMPILED_RULES_FILENAME, compileRules, resolveCompileTarget, syncRules } from './rules.ts';
 import { compileDocsToSource, compileToTarget } from './docs.ts';
 import { seedSourceDir, setupIsolatedEnv } from './test-helpers.ts';
 

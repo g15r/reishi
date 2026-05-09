@@ -531,24 +531,34 @@ export function printSummary(results: SyncResult[]): void {
 
   if (failed.length === 0 && skipped.length === 0) {
     console.log(
-      `${green('✨ Synced')} ${skills.size} skill${skills.size === 1 ? '' : 's'} to ${targets.size} target${
-        targets.size === 1 ? '' : 's'
-      } ${dim(italic(`(${operations} operations)`))}`,
+      `${green('✨ Synced')} ${skills.size} skill${
+        skills.size === 1 ? '' : 's'
+      } to ${targets.size} target${targets.size === 1 ? '' : 's'} ${
+        dim(italic(`(${operations} operations)`))
+      }`,
     );
     return;
   }
 
   const okCount = operations - failed.length - skipped.length;
   console.log(
-    `${green('✨ Synced')} ${okCount}/${operations} operation${operations === 1 ? '' : 's'} across ${skills.size} skill${
-      skills.size === 1 ? '' : 's'
-    }`,
+    `${green('✨ Synced')} ${okCount}/${operations} operation${
+      operations === 1 ? '' : 's'
+    } across ${skills.size} skill${skills.size === 1 ? '' : 's'}`,
   );
   for (const s of skipped) {
-    console.log(`  ${yellow('⚠ skipped')} ${magenta(s.skillName)} → ${s.target} ${dim(italic(`(${s.reason ?? ''})`))}`);
+    console.log(
+      `  ${yellow('⚠ skipped')} ${magenta(s.skillName)} → ${s.target} ${
+        dim(italic(`(${s.reason ?? ''})`))
+      }`,
+    );
   }
   for (const f of failed) {
-    console.log(`  ${red('❌ failed')} ${magenta(f.skillName)} → ${f.target} ${dim(italic(`(${f.reason ?? ''})`))}`);
+    console.log(
+      `  ${red('❌ failed')} ${magenta(f.skillName)} → ${f.target} ${
+        dim(italic(`(${f.reason ?? ''})`))
+      }`,
+    );
   }
 }
 
@@ -706,9 +716,7 @@ async function downloadAndExtract(
     } catch { /* ignore */ }
   }
 
-  const extractedRoot = subpath
-    ? join(tmpDir, ...subpath.split('/').filter(Boolean))
-    : tmpDir;
+  const extractedRoot = subpath ? join(tmpDir, ...subpath.split('/').filter(Boolean)) : tmpDir;
   if (!(await exists(extractedRoot))) {
     try {
       await Deno.remove(tmpDir, { recursive: true });
@@ -870,7 +878,9 @@ async function fetchUpstreamForSkill(
 
     if (options.dryRun) {
       console.log(
-        `${dim(italic('would fetch'))} ${magenta(skillName)} ${dim(italic(`(${summarizeDiff(diff)})`))}`,
+        `${dim(italic('would fetch'))} ${magenta(skillName)} ${
+          dim(italic(`(${summarizeDiff(diff)})`))
+        }`,
       );
       return { fetched: true, changed, diff };
     }
@@ -906,7 +916,9 @@ async function fetchUpstreamForSkill(
         );
         for (const p of merge.protected) {
           console.log(
-            `     ${magenta(p.original)} ${dim(italic('→ upstream saved as'))} ${magenta(p.savedAs)}`,
+            `     ${magenta(p.original)} ${dim(italic('→ upstream saved as'))} ${
+              magenta(p.savedAs)
+            }`,
           );
         }
       }
@@ -972,9 +984,7 @@ async function nextSuffixedName(root: string, rel: string): Promise<string> {
   const ext = extname(base);
   const stem = ext ? base.slice(0, -ext.length) : base;
   for (let n = 1; n < 1000; n++) {
-    const candidate = dir === '.'
-      ? `${stem}_${n}${ext}`
-      : `${dir}/${stem}_${n}${ext}`;
+    const candidate = dir === '.' ? `${stem}_${n}${ext}` : `${dir}/${stem}_${n}${ext}`;
     if (!(await exists(join(root, candidate)))) return candidate;
   }
   // Extremely unlikely — suffix collision beyond 1000.
@@ -1271,7 +1281,9 @@ export async function findOrphans(
             try {
               const lst = await Deno.lstat(path);
               if (lst.isSymlink) continue;
-            } catch { continue; }
+            } catch {
+              continue;
+            }
             if (!activeSkillNames.has(entry.name)) {
               found.push({ kind: 'skill', agent: agentName, path, name: entry.name });
             }
@@ -1295,7 +1307,9 @@ export async function findOrphans(
             try {
               const lst = await Deno.lstat(path);
               if (lst.isSymlink) continue;
-            } catch { continue; }
+            } catch {
+              continue;
+            }
             if (!sourceRuleNames.has(entry.name)) {
               found.push({ kind: 'rule', agent: agentName, path, name: entry.name });
             }
@@ -1512,10 +1526,20 @@ export async function checkForUpdates(
       response = await fetcher(url);
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);
-      return { skillName: name, hasUpdate: false, skipped: true, reason: `fetch error: ${message}` };
+      return {
+        skillName: name,
+        hasUpdate: false,
+        skipped: true,
+        reason: `fetch error: ${message}`,
+      };
     }
     if (!response.ok) {
-      return { skillName: name, hasUpdate: false, skipped: true, reason: `HTTP ${response.status}` };
+      return {
+        skillName: name,
+        hasUpdate: false,
+        skipped: true,
+        reason: `HTTP ${response.status}`,
+      };
     }
     let body: { sha?: string };
     try {

@@ -626,9 +626,14 @@ Deno.test('config link agent: writes [agents.<name>] with skills+rules paths', a
     );
     const r = await runrei(
       [
-        'config', 'link', 'agent', 'opencode',
-        '--skills', join(home, '.opencode/skills'),
-        '--rules', join(home, '.opencode/rules'),
+        'config',
+        'link',
+        'agent',
+        'opencode',
+        '--skills',
+        join(home, '.opencode/skills'),
+        '--rules',
+        join(home, '.opencode/rules'),
       ],
       { env: { HOME: home, REISHI_CONFIG: configPath } },
     );
@@ -668,9 +673,14 @@ Deno.test('config link agent: refuses to clobber an existing entry without --for
     );
     const r = await runrei(
       [
-        'config', 'link', 'agent', 'claude',
-        '--skills', join(home, 'other/skills'),
-        '--rules', join(home, 'other/rules'),
+        'config',
+        'link',
+        'agent',
+        'claude',
+        '--skills',
+        join(home, 'other/skills'),
+        '--rules',
+        join(home, 'other/rules'),
       ],
       { env: { HOME: home, REISHI_CONFIG: configPath } },
     );
@@ -679,9 +689,14 @@ Deno.test('config link agent: refuses to clobber an existing entry without --for
 
     const r2 = await runrei(
       [
-        'config', 'link', 'agent', 'claude',
-        '--skills', join(home, 'other/skills'),
-        '--rules', join(home, 'other/rules'),
+        'config',
+        'link',
+        'agent',
+        'claude',
+        '--skills',
+        join(home, 'other/skills'),
+        '--rules',
+        join(home, 'other/rules'),
         '--force',
       ],
       { env: { HOME: home, REISHI_CONFIG: configPath } },
@@ -716,9 +731,14 @@ Deno.test('config link agent shared: rejects reserved name', async () => {
     );
     const r = await runrei(
       [
-        'config', 'link', 'agent', 'shared',
-        '--skills', '/tmp/skills',
-        '--rules', '/tmp/rules',
+        'config',
+        'link',
+        'agent',
+        'shared',
+        '--skills',
+        '/tmp/skills',
+        '--rules',
+        '/tmp/rules',
       ],
       { env: { HOME: home, REISHI_CONFIG: configPath } },
     );

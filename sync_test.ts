@@ -9,12 +9,7 @@ import { exists } from '@std/fs';
 import { parse as parseTOML, stringify as stringifyTOML } from '@std/toml';
 import type { ConfigSchema, SkillLockEntry } from './config.ts';
 import { resetPathCache } from './paths.ts';
-import {
-  syncAll,
-  syncSkill,
-  syncStatus,
-  unsyncSkill,
-} from './sync.ts';
+import { syncAll, syncSkill, syncStatus, unsyncSkill } from './sync.ts';
 import { type IsolatedEnv, seedSourceDir, setupIsolatedEnv } from './test-helpers.ts';
 
 async function withEnv(
@@ -161,7 +156,10 @@ Deno.test('targets filter limits which named targets receive the skill', async (
       await patchConfig(env.configPath, {
         skills: { source: env.sourceDir },
         agents: {
-          claude: { skills: join(env.home, '.claude', 'skills'), rules: join(env.home, '.claude', 'rules') },
+          claude: {
+            skills: join(env.home, '.claude', 'skills'),
+            rules: join(env.home, '.claude', 'rules'),
+          },
           agents: { skills: otherTarget, rules: join(env.home, '.agents', 'rules') },
         },
       });
@@ -187,7 +185,12 @@ Deno.test('per-skill sync_method override wins over global', async () => {
       await Deno.mkdir(join(env.home, '.claude', 'skills'), { recursive: true });
       await patchConfig(env.configPath, {
         skills: { source: env.sourceDir },
-        agents: { claude: { skills: join(env.home, '.claude', 'skills'), rules: join(env.home, '.claude', 'rules') } },
+        agents: {
+          claude: {
+            skills: join(env.home, '.claude', 'skills'),
+            rules: join(env.home, '.claude', 'rules'),
+          },
+        },
         skill_overrides: {
           alpha: { sync_method: 'symlink' },
         },
@@ -249,7 +252,10 @@ Deno.test('missing target parent: skip with warning', async () => {
       await patchConfig(env.configPath, {
         skills: { source: env.sourceDir },
         agents: {
-          claude: { skills: '/nonexistent-parent-xyz/deep/skills', rules: '/nonexistent-parent-xyz/deep/rules' },
+          claude: {
+            skills: '/nonexistent-parent-xyz/deep/skills',
+            rules: '/nonexistent-parent-xyz/deep/rules',
+          },
         },
       });
       await seedSkill(env, 'alpha');

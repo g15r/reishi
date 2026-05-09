@@ -250,4 +250,3 @@ Deno.test('getRuleNames: returns basename list for tab completion', async () => 
     await env.cleanup();
   }
 });
-

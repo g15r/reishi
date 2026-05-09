@@ -78,8 +78,7 @@ async function withFixture(
 
 Deno.test('add installs a single-skill fixture into the isolated source dir', async () => {
   await withFixture('single-skill-repo', {}, async ({ env, fetcher }) => {
-    const url =
-      'https://github.com/fakeuser/single-skill-repo/tree/main';
+    const url = 'https://github.com/fakeuser/single-skill-repo/tree/main';
     const ok = await addSkill(url, env.sourceDir, { fetcher });
     assertEquals(ok, true);
     assert(
@@ -95,8 +94,7 @@ Deno.test('add installs a single-skill fixture into the isolated source dir', as
 
 Deno.test('add installs all skills from a multi-skill fixture', async () => {
   await withFixture('multi-skill-repo', {}, async ({ env, fetcher }) => {
-    const url =
-      'https://github.com/fakeorg/multi-skill-repo/tree/main/skills';
+    const url = 'https://github.com/fakeorg/multi-skill-repo/tree/main/skills';
     const ok = await addSkill(url, env.sourceDir, { fetcher });
     assertEquals(ok, true);
     assert(await exists(join(env.sourceDir, 'book-review', 'SKILL.md')));

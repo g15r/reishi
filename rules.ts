@@ -70,9 +70,7 @@ export async function listRules(): Promise<RuleEntry[]> {
     if (entry.isDirectory) {
       out.push({ name: entry.name, path: abs, kind: 'directory' });
     } else if (entry.isFile) {
-      const base = entry.name.endsWith('.md')
-        ? entry.name.slice(0, -3)
-        : entry.name;
+      const base = entry.name.endsWith('.md') ? entry.name.slice(0, -3) : entry.name;
       out.push({ name: base, path: abs, kind: 'file' });
     }
   }
@@ -456,9 +454,11 @@ export function printRulesSummary(results: RulesSyncResult[]): void {
 
   if (failed.length === 0 && skipped.length === 0) {
     console.log(
-      `${green('✨ Synced')} ${rules.size} rule${rules.size === 1 ? '' : 's'} to ${targets.size} target${
-        targets.size === 1 ? '' : 's'
-      } ${dim(italic(`(${operations} operations)`))}`,
+      `${green('✨ Synced')} ${rules.size} rule${
+        rules.size === 1 ? '' : 's'
+      } to ${targets.size} target${targets.size === 1 ? '' : 's'} ${
+        dim(italic(`(${operations} operations)`))
+      }`,
     );
     return;
   }
@@ -482,4 +482,3 @@ export function printRulesSummary(results: RulesSyncResult[]): void {
     );
   }
 }
-

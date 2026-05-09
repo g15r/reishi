@@ -14,18 +14,14 @@ import {
   addDocProject,
   compileIndex,
   compileToTarget,
-  getDocProjectNames,
   getDocNames,
+  getDocProjectNames,
   listDocProjects,
   listDocs,
   normalizeProjectPath,
   syncDocs,
 } from './docs.ts';
-import {
-  type IsolatedEnv,
-  seedSourceDir,
-  setupIsolatedEnv,
-} from './test-helpers.ts';
+import { type IsolatedEnv, seedSourceDir, setupIsolatedEnv } from './test-helpers.ts';
 
 async function patchConfig(
   configPath: string,

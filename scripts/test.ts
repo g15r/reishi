@@ -139,11 +139,15 @@ function printReport(results: Result[]) {
 
   if (totalFailed === 0) {
     write(
-      `  ${green(bold(CHECK))} ${green(bold(`${totalPassed} tests passed`))} across ${results.length} suites  ${dim(fmtDuration(totalTime))}\n`,
+      `  ${green(bold(CHECK))} ${
+        green(bold(`${totalPassed} tests passed`))
+      } across ${results.length} suites  ${dim(fmtDuration(totalTime))}\n`,
     );
   } else {
     write(
-      `  ${red(bold(CROSS))} ${bold(`${totalPassed}/${totalTests} passed`)}, ${red(bold(`${totalFailed} failed`))} across ${results.length} suites  ${dim(fmtDuration(totalTime))}\n`,
+      `  ${red(bold(CROSS))} ${bold(`${totalPassed}/${totalTests} passed`)}, ${
+        red(bold(`${totalFailed} failed`))
+      } across ${results.length} suites  ${dim(fmtDuration(totalTime))}\n`,
     );
   }
 
@@ -179,7 +183,9 @@ async function main() {
   const results: Result[] = [];
 
   // Header
-  write(`\n  ${bold(cyan('reishi'))} test runner ${dim('·')} ${bold(String(suites.length))} suites\n\n`);
+  write(
+    `\n  ${bold(cyan('reishi'))} test runner ${dim('·')} ${bold(String(suites.length))} suites\n\n`,
+  );
 
   if (isTTY && !verbose) write(HIDE_CURSOR);
 
@@ -317,7 +323,9 @@ async function runPlain(suites: Suite[], results: Result[]) {
     const ok = parsed.failed === 0;
     const icon = ok ? CHECK : CROSS;
     const failStr = parsed.failed > 0 ? `, ${parsed.failed} failed` : '';
-    write(`  ${icon} ${suite.label}  ${parsed.passed} passed${failStr}  ${fmtDuration(duration)}\n`);
+    write(
+      `  ${icon} ${suite.label}  ${parsed.passed} passed${failStr}  ${fmtDuration(duration)}\n`,
+    );
 
     results.push({ suite, ...parsed, duration, output: combined, success });
   }

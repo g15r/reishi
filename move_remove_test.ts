@@ -8,12 +8,7 @@ import { join } from '@std/path';
 import { exists } from '@std/fs';
 import { parse as parseTOML, stringify as stringifyTOML } from '@std/toml';
 import { resetPathCache } from './paths.ts';
-import {
-  loadConfig,
-  loadLockfile,
-  saveConfig,
-  saveLockfile,
-} from './config.ts';
+import { loadConfig, loadLockfile, saveConfig, saveLockfile } from './config.ts';
 import { moveSkill, removeSkill } from './sync.ts';
 import { moveRule, removeRule, stripMdSuffix } from './rules.ts';
 import { moveDoc, removeDoc } from './docs.ts';
@@ -233,7 +228,10 @@ Deno.test('removeDoc: deletes file and prunes files array', async () => {
 // Skills
 // ---------------------------------------------------------------------------
 
-async function seedSkill(env: Awaited<ReturnType<typeof setupIsolatedEnv>>, name: string): Promise<void> {
+async function seedSkill(
+  env: Awaited<ReturnType<typeof setupIsolatedEnv>>,
+  name: string,
+): Promise<void> {
   await seedSourceDir(env, {
     skills: { [name]: { 'SKILL.md': `---\nname: ${name}\ndescription: x\n---\n` } },
   });

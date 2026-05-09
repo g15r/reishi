@@ -8,11 +8,7 @@ import { exists } from '@std/fs';
 import { parse as parseTOML, stringify as stringifyTOML } from '@std/toml';
 import type { ConfigSchema, LockfileSchema, SkillLockEntry } from './config.ts';
 import { resetPathCache } from './paths.ts';
-import {
-  checkForUpdates,
-  isBackgroundCheckDue,
-  recordBackgroundCheck,
-} from './sync.ts';
+import { checkForUpdates, isBackgroundCheckDue, recordBackgroundCheck } from './sync.ts';
 import { setupIsolatedEnv } from './test-helpers.ts';
 
 async function withEnv(

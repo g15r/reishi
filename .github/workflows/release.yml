@@ -2,7 +2,7 @@ name: Release
 
 on:
   push:
-    tags: ["v*"]
+    tags: ['v*']
 
 permissions:
   contents: write
@@ -17,7 +17,7 @@ jobs:
         with:
           fetch-depth: 0 # full history + all tags for git-cliff
 
-        # TODO: pin to SHA and write a function to easily update periodically
+      # TODO: pin to SHA and write a function to easily update periodically
       - name: Install git-cliff
         uses: taiki-e/install-action@v2
         with:

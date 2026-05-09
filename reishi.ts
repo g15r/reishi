@@ -44,15 +44,15 @@ import {
   printStatus,
   printSummary,
   pullAll,
-  pullSkill,
   type PullOptions,
+  pullSkill,
   type PullSkillResult,
   removeSkill,
   summarizeDiff,
   syncAll,
+  type SyncOptions,
   syncSkill,
   syncStatus,
-  type SyncOptions,
   unsyncSkill,
 } from './sync.ts';
 import {
@@ -68,14 +68,14 @@ import {
   addDocProject,
   compileDocsToSource,
   formatCompileSummary,
-  getDocProjectNames,
   getDocNames,
+  getDocProjectNames,
   listDocProjects,
   listDocs,
   moveDoc,
   removeDoc,
-  unlinkProject,
   syncDocs,
+  unlinkProject,
 } from './docs.ts';
 
 // ============================================================================
@@ -194,9 +194,7 @@ async function syncAndReport(
   mode: 'sync' | 'unsync',
 ): Promise<void> {
   try {
-    const results = mode === 'sync'
-      ? await syncSkill(skillName)
-      : await unsyncSkill(skillName);
+    const results = mode === 'sync' ? await syncSkill(skillName) : await unsyncSkill(skillName);
     if (results.length === 0) return;
     const touched = results.filter((r) => r.action !== 'skipped' && r.action !== 'failed');
     if (touched.length === 0) return;
@@ -206,7 +204,9 @@ async function syncAndReport(
     const failed = results.filter((r) => r.action === 'failed');
     for (const f of failed) {
       console.error(
-        `  ${red('❌ sync failed')} ${magenta(f.skillName)} → ${f.target} ${dim(italic(`(${f.reason ?? ''})`))}`,
+        `  ${red('❌ sync failed')} ${magenta(f.skillName)} → ${f.target} ${
+          dim(italic(`(${f.reason ?? ''})`))
+        }`,
       );
     }
   } catch (error) {
@@ -971,7 +971,6 @@ async function configInit(noExample = false): Promise<boolean> {
 
 async function configShow(): Promise<boolean> {
   try {
-
     const config = await loadConfig();
     const rendered = stringifyTOML(config as unknown as Record<string, unknown>);
     console.log(rendered.trimEnd());
@@ -1002,9 +1001,11 @@ async function runOrphanCleanup(options: {
 
   const fmt = (o: Orphan) => `${o.kind}/${o.name} → ${o.agent}`;
   if (options.dryRun) {
-    console.log(`${dim(italic('clean up 🧼: would remove'))} ${orphans.length} orphan${
-      orphans.length === 1 ? '' : 's'
-    }`);
+    console.log(
+      `${dim(italic('clean up 🧼: would remove'))} ${orphans.length} orphan${
+        orphans.length === 1 ? '' : 's'
+      }`,
+    );
     for (const o of orphans) console.log(`  ${dim(italic(fmt(o)))}`);
     return;
   }
@@ -1094,7 +1095,6 @@ const skillsCommand = new Command()
   .description('Validate skill structure and frontmatter')
   .example('Validate a skill', 'rei skills validate agents/skills/my-skill')
   .action(async (_options, skillPath) => {
-
     const result = await validateSkill(skillPath);
     console.log(result.message);
     Deno.exit(result.valid ? 0 : 1);
@@ -1144,7 +1144,6 @@ const skillsCommand = new Command()
   .example('List active skills', 'rei skills list')
   .example('List all skills', 'rei skills list --all')
   .action(async (options) => {
-
     const success = await listSkills(options.all);
     Deno.exit(success ? 0 : 1);
   })
@@ -1227,9 +1226,7 @@ const skillsCommand = new Command()
     if (syncOpts === null) Deno.exit(1);
     // Sync never passes prefix-change — that's a pull-only concern.
     const { prefixChange: _, ...syncOnly } = syncOpts!;
-    const results = skillName
-      ? await syncSkill(skillName, syncOnly)
-      : await syncAll(syncOnly);
+    const results = skillName ? await syncSkill(skillName, syncOnly) : await syncAll(syncOnly);
     printSummary(results);
     Deno.exit(results.some((r) => r.action === 'failed') ? 1 : 0);
   })
@@ -1270,9 +1267,7 @@ const skillsCommand = new Command()
     }
     const pullOpts = buildSyncOptions(options) as PullOptions | null;
     if (pullOpts === null) Deno.exit(1);
-    const results = skillName
-      ? [await pullSkill(skillName, pullOpts!)]
-      : await pullAll(pullOpts!);
+    const results = skillName ? [await pullSkill(skillName, pullOpts!)] : await pullAll(pullOpts!);
     printPullSummary(results);
     const anyFail = results.some((r) =>
       r.fetch.aborted || r.sync.some((s) => s.action === 'failed')
@@ -1358,8 +1353,8 @@ function printPullSummary(results: PullSkillResult[]): void {
 const linkAgentCmd = new Command()
   .description('Write an [agents.<name>] entry to config')
   .arguments('<name:string>')
-  .option('--skills <path:string>', 'Path to the agent\'s skills target', { required: true })
-  .option('--rules <path:string>', 'Path to the agent\'s rules target', { required: true })
+  .option('--skills <path:string>', "Path to the agent's skills target", { required: true })
+  .option('--rules <path:string>', "Path to the agent's rules target", { required: true })
   .option('--force', 'Overwrite an existing [agents.<name>] entry')
   .example(
     'Link the claude agent',
@@ -1467,9 +1462,7 @@ const unlinkAgentCmd = new Command()
       const result = await unlinkAgent(name);
       if (!result.removedFromConfig) {
         console.log(
-          `${yellow('⚠ No agent')} ${magenta(name)} ${
-            dim(italic('(nothing to unlink)'))
-          }`,
+          `${yellow('⚠ No agent')} ${magenta(name)} ${dim(italic('(nothing to unlink)'))}`,
         );
       } else if (result.toggledSharedAgent) {
         console.log(
@@ -1527,9 +1520,7 @@ const unlinkProjectCmd = new Command()
       const result = await unlinkProject(name, { deleteSourceDir });
       if (!result.removedFromConfig) {
         console.log(
-          `${yellow('⚠ No project')} ${magenta(name)} ${
-            dim(italic('(nothing to unlink)'))
-          }`,
+          `${yellow('⚠ No project')} ${magenta(name)} ${dim(italic('(nothing to unlink)'))}`,
         );
       } else {
         console.log(`${green('✅ Unlinked project')} ${magenta(name)}`);
@@ -1611,7 +1602,6 @@ cli
   .example('Sync everything', 'rei sync')
   .example('Sync to a subset of agents', 'rei sync --agents=claude')
   .action(async (options) => {
-
     const syncOpts = buildSyncOptions(options);
     if (syncOpts === null) Deno.exit(1);
     const { prefixChange: _, ...syncOnly } = syncOpts!;
@@ -1724,9 +1714,9 @@ const rulesCommand = new Command()
     try {
       const result = await compileRules({ outputPath: options.out });
       console.log(
-        `${green('✨ Compiled')} ${result.ruleCount} rule${
-          result.ruleCount === 1 ? '' : 's'
-        } → ${magenta(result.outputPath)}`,
+        `${green('✨ Compiled')} ${result.ruleCount} rule${result.ruleCount === 1 ? '' : 's'} → ${
+          magenta(result.outputPath)
+        }`,
       );
       Deno.exit(0);
     } catch (error) {
@@ -1761,7 +1751,9 @@ const rulesCommand = new Command()
   .action(async (_options, name) => {
     try {
       const result = await removeRule(name);
-      console.log(`${green('🗑  Removed')} ${magenta(name)} ${dim(italic(`(${result.removedPath})`))}`);
+      console.log(
+        `${green('🗑  Removed')} ${magenta(name)} ${dim(italic(`(${result.removedPath})`))}`,
+      );
       Deno.exit(0);
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);
@@ -1779,7 +1771,11 @@ const rulesCommand = new Command()
   .action(async (options) => {
     const syncOpts = buildSyncOptions(options);
     if (syncOpts === null) Deno.exit(1);
-    const results = await syncRules({ agents: syncOpts!.agents, method: syncOpts!.method, dryRun: syncOpts!.dryRun });
+    const results = await syncRules({
+      agents: syncOpts!.agents,
+      method: syncOpts!.method,
+      dryRun: syncOpts!.dryRun,
+    });
     printRulesSummary(results);
     const failed = results.some((r) => r.action === 'failed');
     Deno.exit(failed ? 1 : 0);
@@ -1839,11 +1835,9 @@ const docsCommand = new Command()
   .example('Create a project', 'rei config link project myproject --target ~/code/myproject')
   .action(async (options, project) => {
     console.error(
-      `${yellow('⚠ Deprecated:')} ${
-        dim(italic('use'))
-      } rei config link project ${magenta(project)} ${
-        dim(italic('— `rei docs add` will be removed in a future release'))
-      }`,
+      `${yellow('⚠ Deprecated:')} ${dim(italic('use'))} rei config link project ${
+        magenta(project)
+      } ${dim(italic('— `rei docs add` will be removed in a future release'))}`,
     );
     try {
       const result = await addDocProject(project, {
