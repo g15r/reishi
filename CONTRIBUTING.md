@@ -20,6 +20,19 @@ Create a feature branch off `main`:
 git switch -c fix/some-thing
 ```
 
+## Pre-commit hooks
+
+We use [prek](https://prek.j178.dev/) — a fast, Rust-native, drop-in replacement for `pre-commit`. The config lives at [`prek.toml`](./prek.toml). Hooks cover whitespace and EOF hygiene, config-file syntax (YAML/TOML/JSON), `deno fmt` + `deno lint`, [markdownlint-cli2](https://github.com/DavidAnson/markdownlint-cli2), and [actionlint](https://github.com/rhysd/actionlint) for GitHub Actions workflows.
+
+```bash
+brew install prek          # or see https://prek.j178.dev/installation/
+prek install               # wire up .git/hooks/pre-commit
+prek run --all-files       # one-time run across the whole repo
+prek auto-update           # bump pinned external `rev`s
+```
+
+Hooks aren't enforced in CI today — the same checks run as separate steps in [`.github/workflows/ci.yml`](./.github/workflows/ci.yml) — but installing them locally catches issues before they hit a PR.
+
 ## Commit style
 
 We use [Conventional Commits](https://www.conventionalcommits.org/), enforced in CI. Common types we use: `feat`, `fix`, `refactor`, `test`, `docs`, `chore`. Scopes are optional; when present they map to the construct (`skills`, `rules`, `docs`, `config`, `cli`, `sync`).
