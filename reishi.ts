@@ -1073,7 +1073,7 @@ const skillsCommand = new Command()
   })
   .command('new <skill-name:string>')
   .description('Scaffold a new skill from the embedded template')
-  .option('-p, --path <path:string>', 'Base path for new skill (defaults to config source)')
+  .option('-p, --path <path:file>', 'Base path for new skill (defaults to config source)')
   .example('Create in default location', 'rei skills new my-new-skill')
   .example(
     'Create in custom location',
@@ -1103,7 +1103,7 @@ const skillsCommand = new Command()
     'Add skill(s) from a GitHub tree URL — single skill or a whole skills directory',
   )
   .option(
-    '--path <path:string>',
+    '--path <path:file>',
     'Destination directory for added skills (defaults to config source)',
   )
   .option(
@@ -1351,8 +1351,8 @@ function printPullSummary(results: PullSkillResult[]): void {
 const linkAgentCmd = new Command()
   .description('Write an [agents.<name>] entry to config')
   .arguments('<name:string>')
-  .option('--skills <path:string>', "Path to the agent's skills target", { required: true })
-  .option('--rules <path:string>', "Path to the agent's rules target", { required: true })
+  .option('--skills <path:file>', "Path to the agent's skills target", { required: true })
+  .option('--rules <path:file>', "Path to the agent's rules target", { required: true })
   .option('--force', 'Overwrite an existing [agents.<name>] entry')
   .example(
     'Link the claude agent',
@@ -1385,7 +1385,7 @@ const linkAgentCmd = new Command()
 const linkProjectCmd = new Command()
   .description('Write a [projects.<name>] entry and create the docs source dir')
   .arguments('<name:string>')
-  .option('--target <path:string>', 'Project root on disk for sync')
+  .option('--target <path:file>', 'Project root on disk for sync')
   .option('--force', 'Re-use an existing source dir instead of erroring')
   .example('Link a project', 'rei config link project myproject --target ~/code/myproject')
   .action(async (options, name) => {
@@ -1706,7 +1706,7 @@ const rulesCommand = new Command()
   })
   .command('compile')
   .description('Concatenate all rules into a source artifact (default <rules.source>/AGENTS.md)')
-  .option('--out <path:string>', 'Override the output path')
+  .option('--out <path:file>', 'Override the output path')
   .example('Compile to default location', 'rei rules compile')
   .action(async (options) => {
     try {
@@ -1828,7 +1828,7 @@ const docsCommand = new Command()
   })
   .command('add <project:string>')
   .description('[deprecated] Alias for `rei config link project`')
-  .option('--target <path:string>', 'Project root on disk for sync')
+  .option('--target <path:file>', 'Project root on disk for sync')
   .option('--force', 'Re-use an existing source dir instead of erroring')
   .example('Create a project', 'rei config link project myproject --target ~/code/myproject')
   .action(async (options, project) => {
@@ -1931,7 +1931,7 @@ const docsCommand = new Command()
   })
   .command('sync [project:string:doc-project]')
   .description('Compile and sync docs for one or all configured projects')
-  .option('--target <path:string>', 'Override the target project root (requires <project>)')
+  .option('--target <path:file>', 'Override the target project root (requires <project>)')
   .option('--method <method:string>', 'Override sync method: copy or symlink')
   .option('--dry-run', 'Plan only — do not write')
   .option('--stdout', 'Emit the compiled index to stdout (requires <project>)')

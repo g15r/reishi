@@ -74,6 +74,11 @@ Project-scope requirements that don't belong to a single domain.
   reishi reads (`REISHI_CONFIG`, `REISHI_LOCKFILE`, `HOME`, `XDG_*`).
 - **R009** — `REISHI_CONFIG` and `REISHI_LOCKFILE` must override the default config and lockfile
   paths respectively, with parallel semantics.
+- **R010** — Options whose argument is a filesystem path (`--path`, `--skills`, `--rules`,
+  `--target`, `--out`) must declare it with Cliffy's built-in `file` type (e.g. `<path:file>`), so
+  generated bash, fish, and zsh completion scripts emit shell-native path completion
+  (`compgen -f/-d`, `__fish_complete_path`, `_files`) for those flags. Path completion is provided
+  through Cliffy's completion generator only — no hand-written shell snippets injected outside it.
 
 ## Backlog
 

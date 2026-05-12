@@ -288,6 +288,40 @@ Deno.test('completions: invalid shell name fails', async () => {
   assert(r.code !== 0, 'should fail for unsupported shell');
 });
 
+// R010 — path-typed options use Cliffy's built-in `file` type so the generated
+// completion scripts emit shell-native path completion for those flags.
+Deno.test('completions: fish emits path completion for --path/--skills/--rules/--target/--out', async () => {
+  const r = await runrei(['completions', 'fish']);
+  assertEquals(r.code, 0, `stderr=${r.stderr}`);
+  // The fish generator emits `__fish_complete_path` whenever an option's arg
+  // type is FileType; if any of the five path-typed flags slips back to
+  // `:string`, this marker disappears or count drops.
+  const matches = r.stdout.match(/__fish_complete_path/g) ?? [];
+  assert(
+    matches.length >= 5,
+    `expected ≥5 __fish_complete_path occurrences (one per path-typed flag), got ${matches.length}`,
+  );
+});
+
+Deno.test('completions: zsh emits _files for path-typed flags', async () => {
+  const r = await runrei(['completions', 'zsh']);
+  assertEquals(r.code, 0, `stderr=${r.stderr}`);
+  assertStringIncludes(r.stdout, '_files');
+});
+
+Deno.test('completions: bash emits file/dir compgen helper for path-typed flags', async () => {
+  const r = await runrei(['completions', 'bash']);
+  assertEquals(r.code, 0, `stderr=${r.stderr}`);
+  // The bash generator emits a `_rei_file_dir` helper definition once, plus a
+  // call to it per FileType-typed arg. Helper-only output (1 occurrence) means
+  // no flag is actually using the file type — require ≥2 to catch that.
+  const matches = r.stdout.match(/_rei_file_dir/g) ?? [];
+  assert(
+    matches.length >= 2,
+    `expected ≥2 _rei_file_dir occurrences (helper + callsites), got ${matches.length}`,
+  );
+});
+
 // ============================================================================
 // Config
 // ============================================================================
