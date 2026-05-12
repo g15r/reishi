@@ -88,12 +88,22 @@ delete; lingering items are noise.
   wraps markdownlint and adds agent-context-engineering rules. Lower-priority extension to rules and
   docs (pure markdown linting).
 
-### LLM-powered features
+### LLM-powered creation and improvement
 
 - `refine` commands across skills, docs, and rules — configurable, template-based LLM prompt to
-  improve sources for more effective language and structure in fewer tokens.
-- `validate --audit` — semantic conflict detection: warn when two skills have overlapping tool
-  permissions or trigger conditions.
+  improve sources for more effective language and structure in fewer tokens, audit permissions, etc.
+- `audit` — operates across the skills library, looking for semantic conflict detection, overlap, misaligned permissions, etc.
+- some potential techniques: using description and first paragraph to pin purpose, then evaluating the full skill and references based on this
+  - potentially configure logfile sources for agent targets, and use them to surface skills that are not being triggered or used (not necessarily a problem, some skills are just rarely triggered, but useful signal)
+- `skills new -i/--interactive` once validation and improvement are working well, it should be easy to repurpose these for walking through a more interactive skill creation flow with an agent, something like:
+  1. distill purpose
+  2. determine scope boundaries
+  3. research and synthesize
+  4. feedback
+  5. refine
+  6. validate
+
+Full custom evals are out of scope for the tool as currently envisioned. They are truly useful, but also present too many new surfaces and constructs to support without significantly complicating the codebase. A complementary tool down the road might be an option.
 
 ### `checkpoint` command
 
