@@ -17,6 +17,7 @@ jobs:
         uses: actions/checkout@v6
         with:
           ref: ${{ github.event.release.tag_name }}
+          persist-credentials: false
 
       - name: Setup Deno
         uses: denoland/setup-deno@v2
@@ -40,7 +41,7 @@ jobs:
           sha256sum reishi-*.tar.gz > "reishi-${TAG}-checksums.txt"
 
           echo "### Artifacts" >> "$GITHUB_STEP_SUMMARY"
-          ls -la reishi-*.tar.gz reishi-*-checksums.txt | tee -a "$GITHUB_STEP_SUMMARY"
+          find . -maxdepth 1 \( -name "reishi-*.tar.gz" -o -name "reishi-*-checksums.txt" \) -exec ls -la {} + | tee -a "$GITHUB_STEP_SUMMARY"
 
       - name: Upload release assets
         env:

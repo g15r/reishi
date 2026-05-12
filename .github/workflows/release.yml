@@ -16,6 +16,7 @@ jobs:
         uses: actions/checkout@v6
         with:
           fetch-depth: 0 # full history + all tags for git-cliff
+          persist-credentials: false
 
       # TODO: pin to SHA and write a function to easily update periodically
       - name: Install git-cliff
