@@ -1,3 +1,4 @@
 [aliases]
+mdf = "markdownlint-cli2 '**/*.md' --fix"
 ship = "deno task test; and deno task install"
 t = "deno task test"
